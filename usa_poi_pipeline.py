@@ -41,6 +41,8 @@ from transformers import (
     MetricsTransformer,
     QualityTransformer,
     EstablishmentTransformer,
+    load_category_mapping,
+    load_brand_config,
 )
 
 from config.schema_mapping import (
@@ -479,21 +481,27 @@ def main():
     except Exception as e:
         print(f"Warning: Could not load GADM boundaries: {e}")
 
-    # Try to load category mapping
+    # Try to load category mapping using robust loader
     try:
         cat_path = os.getenv('CATEGORY_MAPPING_PATH', 'data/xmap_poi_categorization.csv')
-        if os.path.exists(cat_path):
-            category_mapping_df = pd.read_csv(cat_path)
+        category_mapping_df = load_category_mapping(cat_path)
+        if category_mapping_df is not None:
             print(f"Loaded category mapping: {len(category_mapping_df)} categories")
+            print(f"  Detected columns: {list(category_mapping_df.columns)}")
+        else:
+            print(f"Warning: Could not load category mapping from {cat_path}")
     except Exception as e:
         print(f"Warning: Could not load category mapping: {e}")
 
-    # Try to load brand config
+    # Try to load brand config using robust loader
     try:
         brand_path = os.getenv('BRAND_CONFIG_PATH', 'data/branding_usa_configs.csv')
-        if os.path.exists(brand_path):
-            brand_config_df = pd.read_csv(brand_path)
+        brand_config_df = load_brand_config(brand_path)
+        if brand_config_df is not None:
             print(f"Loaded brand config: {len(brand_config_df)} brands")
+            print(f"  Detected columns: {list(brand_config_df.columns)}")
+        else:
+            print(f"Warning: Could not load brand config from {brand_path}")
     except Exception as e:
         print(f"Warning: Could not load brand config: {e}")
 

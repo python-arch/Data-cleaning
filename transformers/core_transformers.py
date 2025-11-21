@@ -18,36 +18,111 @@ class CoreTransformer:
     - brand_name: Brand matching
     """
 
+    # Column name mappings for flexible schema support
+    NAME_COLUMNS = ['name', 'poi_name', 'business_name', 'place_name']
+    DOMAIN_COLUMNS = ['website_domain', 'domain', 'website', 'web_domain']
+    BRAND_COLUMNS = ['brand_name', 'brand', 'chain_name', 'parent_brand']
+    CATEGORY_COLUMNS = ['original_category', 'category', 'user_category', 'category_main']
+
     def __init__(self, brand_config_df: Optional[pd.DataFrame] = None):
         """
         Initialize CoreTransformer
 
         Args:
             brand_config_df: DataFrame with brand configuration
-                Expected columns: name, website_domain, original_category, brand_name
+                Flexible schema - supports various column names:
+                - Name: name, poi_name, business_name, place_name
+                - Domain: website_domain, domain, website, web_domain
+                - Brand: brand_name, brand, chain_name, parent_brand
+                - Category: original_category, category, user_category
         """
         self.brand_config = brand_config_df
+        self._column_mapping = {}
         self._build_brand_index()
 
+    def _find_column(self, df: pd.DataFrame, candidates: list) -> Optional[str]:
+        """
+        Find the first matching column name from candidates
+
+        Args:
+            df: DataFrame to search
+            candidates: List of possible column names
+
+        Returns:
+            First matching column name or None
+        """
+        if df is None:
+            return None
+        for col in candidates:
+            if col in df.columns:
+                return col
+        return None
+
+    def _clean_value(self, val: Any) -> str:
+        """Clean and normalize a value for lookup"""
+        if pd.isna(val) or val is None:
+            return ''
+        return str(val).lower().strip()
+
     def _build_brand_index(self):
-        """Build efficient lookup indexes for brand matching"""
+        """Build efficient lookup indexes for brand matching with flexible column detection"""
         self.brand_by_name = {}
         self.brand_by_domain = {}
         self.brand_by_name_domain = {}
 
-        if self.brand_config is not None:
-            for _, row in self.brand_config.iterrows():
-                name = str(row.get('name', '')).lower().strip()
-                domain = str(row.get('website_domain', '')).lower().strip()
-                brand = row.get('brand_name')
+        if self.brand_config is None:
+            return
 
-                if pd.notna(brand):
-                    if name:
-                        self.brand_by_name[name] = brand
-                    if domain:
-                        self.brand_by_domain[domain] = brand
-                    if name and domain:
-                        self.brand_by_name_domain[(name, domain)] = brand
+        # Drop any unnamed columns (like index columns from CSV)
+        cols_to_use = [c for c in self.brand_config.columns if not c.startswith('Unnamed')]
+
+        # Detect column names
+        name_col = self._find_column(self.brand_config, self.NAME_COLUMNS)
+        domain_col = self._find_column(self.brand_config, self.DOMAIN_COLUMNS)
+        brand_col = self._find_column(self.brand_config, self.BRAND_COLUMNS)
+
+        # Store mapping for reference
+        self._column_mapping = {
+            'name': name_col,
+            'domain': domain_col,
+            'brand': brand_col,
+        }
+
+        if brand_col is None:
+            # No brand column found, cannot build mapping
+            return
+
+        for _, row in self.brand_config.iterrows():
+            try:
+                brand = row.get(brand_col)
+                if pd.isna(brand) or brand is None:
+                    continue
+
+                brand = str(brand).strip()
+                if not brand:
+                    continue
+
+                # Get name and domain safely
+                name = ''
+                domain = ''
+
+                if name_col:
+                    name = self._clean_value(row.get(name_col))
+
+                if domain_col:
+                    domain = self._clean_value(row.get(domain_col))
+
+                # Build lookup indexes
+                if name:
+                    self.brand_by_name[name] = brand
+                if domain:
+                    self.brand_by_domain[domain] = brand
+                if name and domain:
+                    self.brand_by_name_domain[(name, domain)] = brand
+
+            except Exception:
+                # Skip malformed rows
+                continue
 
     # ========================================================================
     # POI ID Generation
@@ -163,7 +238,7 @@ class CoreTransformer:
 
     def match_brand(self, row: pd.Series) -> Optional[str]:
         """
-        Match POI to brand name
+        Match POI to brand name using multiple lookup strategies
 
         Args:
             row: DataFrame row with name, website_domain, category
@@ -174,20 +249,37 @@ class CoreTransformer:
         if self.brand_config is None:
             return None
 
-        name = str(row.get('name', '')).lower().strip()
-        domain = str(row.get('website_domain', '')).lower().strip()
+        # Check if any lookup index is available
+        if not self.brand_by_name and not self.brand_by_domain and not self.brand_by_name_domain:
+            return None
 
-        # Try exact match on name + domain first
-        if (name, domain) in self.brand_by_name_domain:
+        # Safely extract name and domain
+        name_val = row.get('name')
+        domain_val = row.get('website_domain')
+
+        name = self._clean_value(name_val)
+        domain = self._clean_value(domain_val)
+
+        # Strategy 1: Exact match on name + domain (highest confidence)
+        if name and domain and (name, domain) in self.brand_by_name_domain:
             return self.brand_by_name_domain[(name, domain)]
 
-        # Try name match
-        if name in self.brand_by_name:
+        # Strategy 2: Try name match
+        if name and name in self.brand_by_name:
             return self.brand_by_name[name]
 
-        # Try domain match
-        if domain in self.brand_by_domain:
+        # Strategy 3: Try domain match
+        if domain and domain in self.brand_by_domain:
             return self.brand_by_domain[domain]
+
+        # Strategy 4: Try partial domain match (for subdomains)
+        if domain:
+            # Extract base domain (e.g., "store.example.com" -> "example.com")
+            domain_parts = domain.split('.')
+            if len(domain_parts) > 2:
+                base_domain = '.'.join(domain_parts[-2:])
+                if base_domain in self.brand_by_domain:
+                    return self.brand_by_domain[base_domain]
 
         return None
 
