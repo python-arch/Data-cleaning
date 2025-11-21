@@ -181,7 +181,7 @@ class StatusTransformer:
             current_df: Current version DataFrame with poi_id and status
 
         Returns:
-            Dict mapping poi_id to status change ('Opened this month' or 'Closed this month')
+            Dict mapping poi_id to status change ('Recently Opened' or 'Closed this month')
         """
         status_changes = {}
 
@@ -197,11 +197,9 @@ class StatusTransformer:
                     status_changes[poi_id] = 'Closed this month'
                 # Check if status changed from closed to open
                 elif prev_status in ['Closed', 'Temporarily Closed'] and current_status == 'Open':
-                    status_changes[poi_id] = 'Opened this month'
-            else:
-                # New POI in current version - check if it opened this month
-                if current_status == 'Open':
-                    status_changes[poi_id] = 'Opened this month'
+                    status_changes[poi_id] = 'Recently Opened'
+            # Note: New POIs in current version are NOT marked as "Opened this month"
+            # Only POIs with oldest_date matching processing month get that flag
 
         return status_changes
 
@@ -212,7 +210,9 @@ class StatusTransformer:
 
         Logic:
         1. If oldest_date month matches processing month AND status is Open -> 'Opened this month'
-        2. If version_comparison has a status change for this POI, use it
+        2. If version_comparison has a status change for this POI, use it:
+           - 'Recently Opened' (status changed from Closed to Open)
+           - 'Closed this month' (status changed from Open to Closed)
         3. Otherwise -> None
 
         Args:
@@ -221,7 +221,7 @@ class StatusTransformer:
             version_comparison: Optional dict from compare_versions
 
         Returns:
-            'Opened this month', 'Closed this month', or None
+            'Opened this month', 'Recently Opened', 'Closed this month', or None
         """
         poi_id = str(row.get('poi_id', ''))
         status = row.get('status', 'Unknown')
