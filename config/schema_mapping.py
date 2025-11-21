@@ -18,6 +18,15 @@ SOURCE_COLUMNS = [
     'google_id'
 ]
 
+# Required columns for input POI data
+REQUIRED_INPUT_COLUMNS = ['google_id', 'name', 'latitude', 'longitude']
+
+# Required columns for brand config file
+BRAND_CONFIG_COLUMNS = ['name', 'website_domain', 'brand_name']
+
+# Required columns for category mapping file
+CATEGORY_MAPPING_COLUMNS = ['original_category', 'meta_category', 'middle_category', 'target_category']
+
 DIRECT_MAPPINGS = {
     'name': 'name',
     'latitude': 'latitude',
@@ -153,18 +162,4 @@ DINING_TYPE_THRESHOLDS = {
     'Fine Dining': 7,
     'Family Dining': 6,
     'Casual Dining': 4,
-}
-
-CATEGORY_COLUMN_CANDIDATES = {
-    'original': ['original_category', 'source_category', 'category', 'category_main'],
-    'level_1': ['meta_category', 'big_category', 'category_level_1', 'category_l1'],
-    'level_2': ['middle_category', 'mapped_category', 'category_level_2', 'category_l2'],
-    'level_3': ['target_category', 'final_category', 'category_level_3', 'category_l3'],
-}
-
-BRAND_COLUMN_CANDIDATES = {
-    'name': ['name', 'poi_name', 'business_name', 'place_name'],
-    'domain': ['website_domain', 'domain', 'website', 'web_domain'],
-    'brand': ['brand_name', 'brand', 'chain_name', 'parent_brand'],
-    'category': ['original_category', 'category', 'user_category', 'category_main'],
 }

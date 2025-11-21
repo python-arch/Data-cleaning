@@ -1,14 +1,46 @@
 # Variable Mapping Guide
 
-This document explains how each output field is created from the source data.
+How each output field is created from the source data.
 
 ## Quick Stats
 
 | Status | Count |
 |--------|-------|
 | Implemented | 32 |
-| Needs Data | 0 |
-| Notes | 3 |
+| Output Fields | 38 |
+
+---
+
+## Required Schema
+
+The pipeline enforces strict schema validation. Files must have exact column names.
+
+### Input Data (POI)
+
+Required columns:
+- `google_id` - Unique identifier
+- `name` - Business name
+- `latitude` - Coordinate
+- `longitude` - Coordinate
+
+### Brand Config File
+
+Required columns: `name`, `website_domain`, `brand_name`
+
+```csv
+name,website_domain,brand_name
+starbucks,starbucks.com,Starbucks
+mcdonald's,mcdonalds.com,McDonald's
+```
+
+### Category Mapping File
+
+Required columns: `original_category`, `meta_category`, `middle_category`, `target_category`
+
+```csv
+original_category,meta_category,middle_category,target_category
+restaurant,Food & Beverage,Restaurants & Eateries,Restaurant
+```
 
 ---
 
@@ -16,12 +48,10 @@ This document explains how each output field is created from the source data.
 
 | Output Field | Source | How It Works |
 |--------------|--------|--------------|
-| `poi_id` | `google_id` | Hashed with MD5 for uniqueness |
-| `name` | `name` | Cleaned up (extra spaces removed) |
+| `poi_id` | `google_id` | MD5 hash for uniqueness |
+| `name` | `name` | Cleaned (extra spaces removed) |
 | `chain_flag` | Derived | Matched against known brands (yes/no) |
 | `brand_name` | Derived | Matched from brand config file |
-
-**Note:** Chain detection needs `branding_usa_configs.csv`. Without it, all POIs show as non-chain.
 
 ---
 
@@ -29,11 +59,9 @@ This document explains how each output field is created from the source data.
 
 | Output Field | Source | How It Works |
 |--------------|--------|--------------|
-| `category_level_1` | `category_main` | Top-level category (e.g., "Food & Beverage") |
-| `category_level_2` | `category_main` | Mid-level category (e.g., "Restaurants") |
-| `category_level_3` | `category_main` | Specific category (e.g., "Italian Restaurant") |
-
-**Note:** Requires `xmap_poi_categorization.csv` for mapping. Without it, categories are empty.
+| `category_level_1` | `category_main` | Top-level (e.g., "Food & Beverage") |
+| `category_level_2` | `category_main` | Mid-level (e.g., "Restaurants") |
+| `category_level_3` | `category_main` | Specific (e.g., "Italian Restaurant") |
 
 ---
 
@@ -43,7 +71,7 @@ This document explains how each output field is created from the source data.
 |--------------|--------|--------------|
 | `status` | `business_status` | Simplified to: Open, Closed, or Temporarily Closed |
 
-**Mapping:**
+Mapping:
 - `open`, `open 24 hours`, `operational` = **Open**
 - `closed`, `permanently closed` = **Closed**
 - `closed_temporarily`, `temporarily closed` = **Temporarily Closed**
@@ -57,7 +85,7 @@ This document explains how each output field is created from the source data.
 | `latitude` | `latitude` | Small random noise added for privacy |
 | `longitude` | `longitude` | Small random noise added for privacy |
 
-**Filtering:**
+Filtering:
 - Records outside continental USA (24-49.5N, 125-66W) are removed
 - Invalid or missing coordinates are removed
 
@@ -75,10 +103,6 @@ This document explains how each output field is created from the source data.
 | `country_code` | `country` | Direct copy |
 | `country_isocode` | `country` | Direct copy |
 
-**Notes:**
-- With GADM boundaries file, city/state are corrected using GPS coordinates
-- Postal codes must be 5 digits (or 5+4 format)
-
 ---
 
 ## Inside Establishment
@@ -90,15 +114,7 @@ This document explains how each output field is created from the source data.
 | `parent_establishment_type` | `inside_places_categories` | Type of parent (Mall, Airport, etc.) |
 | `floor_level` | `floor_no` | Normalized format (L1, B1, Ground) |
 
-**Parent Types:**
-- Mall: shopping centers, outlets
-- Airport: terminals, airports
-- Hospital: medical centers, clinics
-- Campus: universities, colleges, schools
-- Hotel: hotels, resorts
-- Transit Station: train, bus, subway stations
-- Stadium: arenas, sports complexes
-- Casino: casinos
+Parent Types: Mall, Airport, Hospital, Campus, Hotel, Transit Station, Stadium, Casino
 
 ---
 
@@ -108,12 +124,8 @@ This document explains how each output field is created from the source data.
 |--------------|--------|--------------|
 | `status_change` | Derived | "Opened this month" or "Closed this month" |
 | `open_date` | `oldest_date` | When the POI first appeared |
-| `closed_date` | Derived | When the POI closed (tracked over time) |
+| `closed_date` | Derived | When the POI closed |
 | `last_verified_date` | `day_time` | Last data verification date |
-
-**Notes:**
-- Status tracking works best with multiple monthly data files
-- Handles edge cases: reopenings, boundary detection
 
 ---
 
@@ -124,13 +136,13 @@ This document explains how each output field is created from the source data.
 | `dining_type` | Derived | Restaurant classification |
 | `price_level` | `price_level` or `price_range` | 1-5 scale |
 
-**Dining Types:**
+Dining Types:
 - **QSR**: Fast food, drive-through, counter service
 - **Fine Dining**: Upscale, reservations, high price
 - **Family Dining**: Kid-friendly, group-friendly
 - **Casual Dining**: Relaxed atmosphere, dine-in
 
-**Price Scale:**
+Price Scale:
 - 1: Budget ($, under $15)
 - 2: Moderate ($$, $15-25)
 - 3: Mid-range ($$$, $25-40)
@@ -146,7 +158,7 @@ This document explains how each output field is created from the source data.
 | `average_stay_duration_minutes` | `time_spent` | Converted to minutes |
 | `traffic_score` | `popular_times_data` | Weekly average (0-100) |
 
-**Duration Examples:**
+Duration Examples:
 - "up to 3 hours" = 180 minutes
 - "30 min to 1 hour" = 60 minutes
 
@@ -170,12 +182,12 @@ This document explains how each output field is created from the source data.
 | `verification_confidence_score` | Derived | Quality score (0-100) |
 | `data_quality_flag` | Derived | Clean, Needs Review, or Low Confidence |
 
-**Verification Source:**
+Verification Source:
 - **Partner**: Business is claimed by owner
 - **Manual**: Has detailed description and photos
 - **Automated**: Everything else
 
-**Quality Score Breakdown:**
+Quality Score Breakdown:
 
 | Check | Points |
 |-------|--------|
@@ -192,7 +204,7 @@ This document explains how each output field is created from the source data.
 | Good address quality | 10 |
 | Valid phone format | 5 |
 
-**Quality Flags:**
+Quality Flags:
 - **Clean**: Score 70+
 - **Needs Review**: Score 40-69
 - **Low Confidence**: Score under 40
@@ -219,15 +231,15 @@ This document explains how each output field is created from the source data.
 
 ## Reference Files
 
-These optional files improve data quality:
+Required configuration files:
 
 1. **`branding_usa_configs.csv`** - Brand/chain detection
-   - Columns: `name`, `website_domain`, `original_category`, `brand_name`
+   - Required columns: `name`, `website_domain`, `brand_name`
 
 2. **`xmap_poi_categorization.csv`** - Category mapping
-   - Columns: `original_category`, `target_category`, `middle_category`, `meta_category`
+   - Required columns: `original_category`, `meta_category`, `middle_category`, `target_category`
 
-3. **`usa_admin.geojson`** - Geographic boundaries
+3. **`usa_admin.geojson`** - Geographic boundaries (optional)
    - Used to correct city/state from coordinates
 
 ---
@@ -238,16 +250,31 @@ Records are removed if:
 - Coordinates are missing or invalid
 - Location is outside continental USA
 - Name is meaningless (just numbers, coordinates, etc.)
-- Name starts with number (except "7-Eleven")
-- Address contains HTTP
 - Duplicate POI ID
+
+---
+
+## Logging
+
+The pipeline uses Python's logging module. Log levels:
+- **INFO**: Processing progress, file operations, summary stats
+- **DEBUG**: Detailed row counts, transformation details
+- **WARNING**: Missing optional data, skipped files
+- **ERROR**: Schema validation failures, processing errors
+
+Configure logging:
+```python
+logger = setup_logging(log_level='INFO', log_file='pipeline.log')
+```
 
 ---
 
 ## Usage Example
 
 ```python
-from usa_poi_pipeline import USAPOIPipeline
+from usa_poi_pipeline import USAPOIPipeline, setup_logging
+
+logger = setup_logging(log_level='INFO')
 
 pipeline = USAPOIPipeline(
     s3_client=s3_client,
@@ -255,11 +282,32 @@ pipeline = USAPOIPipeline(
     local_download_path='/tmp/download',
     local_save_path='./output/usa',
     gadm_boundaries=gadm_gdf,       # Optional
-    category_mapping_df=cat_df,     # Optional
-    brand_config_df=brand_df,       # Optional
+    category_mapping_df=cat_df,     # Required schema
+    brand_config_df=brand_df,       # Required schema
+    logger=logger,
 )
 
 pipeline.run()
 ```
 
 Output: `USA_YYYYMMDD.csv` with all fields populated.
+
+---
+
+## Error Handling
+
+The pipeline raises errors for schema violations:
+
+```python
+# Missing brand config columns
+ValueError: Brand config file missing required columns: ['website_domain'].
+Expected columns: ['name', 'website_domain', 'brand_name'].
+Found columns: ['name', 'brand_name']
+
+# Missing category mapping columns
+ValueError: Category mapping file missing required columns: ['meta_category'].
+Expected columns: ['original_category', 'meta_category', 'middle_category', 'target_category'].
+
+# Missing input data columns
+ValueError: Input data missing required columns: ['google_id']
+```
