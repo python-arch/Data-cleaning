@@ -287,9 +287,12 @@ class USAPOIPipeline:
                 on_bad_lines='skip'
             )
 
-            all_chunks = []
+            # Stream chunks directly to CSV file to handle large files
             chunk_number = 0
             total_input_rows = 0
+            total_output_rows = 0
+            seen_poi_ids = set()  # Track duplicates across chunks
+            first_chunk = True
 
             for chunk in csv_chunker:
                 chunk_number += 1
@@ -305,33 +308,40 @@ class USAPOIPipeline:
                 processed_chunk = self.process_chunk(chunk, data_version_month, chunk_version_comparison)
 
                 if not processed_chunk.empty:
-                    all_chunks.append(processed_chunk)
-                    self.logger.info(f"Chunk {chunk_number}: {len(processed_chunk):,} output rows")
+                    # Remove duplicates within chunk and across previous chunks
+                    before_dedup = len(processed_chunk)
+                    processed_chunk = processed_chunk[~processed_chunk['poi_id'].isin(seen_poi_ids)]
+                    processed_chunk = processed_chunk.drop_duplicates(subset='poi_id', keep='first')
+
+                    # Track seen poi_ids
+                    seen_poi_ids.update(processed_chunk['poi_id'].tolist())
+
+                    removed_dupes = before_dedup - len(processed_chunk)
+                    self.stats['removed_duplicates'] += removed_dupes
+
+                    if not processed_chunk.empty:
+                        # Stream to CSV: write header only for first chunk
+                        processed_chunk.to_csv(
+                            local_save_csv_path,
+                            mode='a' if not first_chunk else 'w',
+                            header=first_chunk,
+                            index=False
+                        )
+                        first_chunk = False
+                        total_output_rows += len(processed_chunk)
+                        self.logger.info(f"Chunk {chunk_number}: {len(processed_chunk):,} output rows (streamed to CSV)")
 
             self.stats['total_input_rows'] += total_input_rows
+            self.stats['total_output_rows'] += total_output_rows
 
-            if all_chunks:
-                self.logger.info(f"Merging {len(all_chunks)} chunks...")
-                final_df = pd.concat(all_chunks, ignore_index=True)
-
-                before = len(final_df)
-                final_df = final_df.drop_duplicates(subset='poi_id', keep='first')
-                removed_dupes = before - len(final_df)
-                self.stats['removed_duplicates'] += removed_dupes
-
-                if removed_dupes > 0:
-                    self.logger.info(f"Removed {removed_dupes:,} duplicates")
-
-                self.logger.info(f"Saving {len(final_df):,} rows to {output_filename}")
-                final_df.to_csv(local_save_csv_path, index=False)
-
-                self.stats['total_output_rows'] += len(final_df)
+            if total_output_rows > 0:
                 self.stats['files_processed'] += 1
-
                 file_time = time.time() - file_start_time
-                self.logger.info(f"Completed in {file_time:.1f}s | Input: {total_input_rows:,} | Output: {len(final_df):,}")
+                self.logger.info(f"Completed in {file_time:.1f}s | Input: {total_input_rows:,} | Output: {total_output_rows:,}")
 
-                return final_df
+                # Return a lightweight version for comparison (only poi_id and status)
+                # Don't load entire file back into memory
+                return pd.read_csv(local_save_csv_path, usecols=['poi_id', 'status'])
             else:
                 self.logger.warning("No data to save after processing")
                 return None
