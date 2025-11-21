@@ -342,6 +342,6 @@ class MetricsTransformer:
         if 'rating' in df.columns:
             result['average_rating'] = df['rating'].apply(self.clean_rating)
         if 'rating_count' in df.columns:
-            result['review_count'] = df['rating_count'].apply(self.clean_review_count)
+            result['rating_count'] = df['rating_count'].apply(self.clean_review_count)
 
         return result
