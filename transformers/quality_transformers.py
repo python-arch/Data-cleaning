@@ -139,7 +139,9 @@ class QualityTransformer:
                 if not hours_str:
                     return None
                 try:
-                    open_hours_data = json.loads(hours_str.replace("'", "\""))
+                    # Convert Python-style booleans/None to JSON format
+                    json_str = hours_str.replace("'", "\"").replace("True", "true").replace("False", "false").replace("None", "null")
+                    open_hours_data = json.loads(json_str)
                 except json.JSONDecodeError:
                     try:
                         open_hours_data = literal_eval(hours_str)
@@ -179,7 +181,7 @@ class QualityTransformer:
                         # Get intervals
                         elif 'intervals' in day_data:
                             intervals = day_data['intervals']
-                            if isinstance(intervals, list) and intervals:
+                            if isinstance(intervals, list) and len(intervals) > 0:
                                 # Format each interval
                                 interval_strs = []
                                 for interval in intervals:
@@ -199,9 +201,9 @@ class QualityTransformer:
                     else:
                         result[abbrev] = 'Closed'
 
-            # Return ordered result as JSON string
+            # Return ordered result - include all days in order
             if result:
-                ordered_result = {day: result.get(day, 'Closed') for day in day_order if day in result}
+                ordered_result = {day: result.get(day, 'Closed') for day in day_order}
                 return json.dumps(ordered_result)
 
             return None
