@@ -522,7 +522,3 @@ BRAND_CONFIG_PATH=data/branding_usa_configs.csv
 ```
 
 ---
-
-## License
-
-Proprietary - Internal Use Only
