@@ -47,7 +47,7 @@ The following core functionalities were adapted from the original `extended_data
 | **Postcode Extraction** | `extract_postcode_vectorized()` | `LocationTransformer.extract_postcode_from_address()` | Extract postal code from address string |
 | **USA Boundary Check** | `is_outside_usa_vectorized()` | `LocationTransformer.is_outside_usa_vectorized()` | Filter records outside continental USA |
 | **Meaningless Name Detection** | `is_meaningless_name_vectorized()` | `CoreTransformer.is_valid_name()` | Detect invalid POI names |
-| **GADM Spatial Join** | `clean_region_with_gadm()` | `LocationTransformer.apply_gadm_boundaries()` | Correct city/state using GADM boundaries |
+| **GADM Spatial Join** | `clean_region_with_gadm()` | `LocationTransformer.apply_gadm_boundaries()` | Derive region/locality from GADM boundaries using coordinates |
 | **POI Status Analysis** | `POIStatusAnalyzer` class | `StatusTransformer` | Track open/close dates across multiple months |
 
 ---
@@ -62,8 +62,6 @@ These fields are taken directly from the source data with minimal or no transfor
 | `latitude` | `latitude` | Privacy noise added (see Derived Features) |
 | `longitude` | `longitude` | Privacy noise added (see Derived Features) |
 | `street` | `street` | Direct copy |
-| `locality` | `locality` | Direct copy |
-| `region` | `region_level_1` | Direct copy (column rename) |
 | `country_code` | `country` | Direct copy |
 | `country_isocode` | `country` | Direct copy |
 | `rating_count` | `rating_count` | Direct copy |
@@ -72,6 +70,8 @@ These fields are taken directly from the source data with minimal or no transfor
 | `floor_level` | `floor_no` | Normalized format (see Derived Features) |
 | `website_domain` | `website_domain` | Direct copy |
 | `phone` | `phone` | Validated format (see Derived Features) |
+
+**Note:** `region` and `locality` are NOT taken directly from source columns. They are derived from GADM administrative boundaries using POI coordinates. See Derived Features section.
 
 ---
 
@@ -226,7 +226,43 @@ These fields are computed or derived from one or more source columns. Each inclu
   Regex: \b\d{5}(?:-\d{4})?\b
   ```
 
-#### 11. `inside_establishment_flag`
+#### 11. `region`
+- **Source**: `latitude`, `longitude` + GADM boundaries
+- **Transformer**: `LocationTransformer.apply_gadm_boundaries()`
+- **Logic**:
+  ```
+  Derive region (state/province) from GADM administrative boundaries:
+
+  1. Create point geometry from POI coordinates
+  2. Perform spatial join with GADM boundaries
+  3. Extract NAME_1 (first-level admin division) as region
+  4. This replaces source region_level_1 for accuracy
+
+  Example: Coordinates (34.052, -118.243) -> "California"
+
+  Note: Requires GADM_PATH environment variable to be set.
+  If GADM boundaries not available, region will be None.
+  ```
+
+#### 12. `locality`
+- **Source**: `latitude`, `longitude` + GADM boundaries
+- **Transformer**: `LocationTransformer.apply_gadm_boundaries()`
+- **Logic**:
+  ```
+  Derive locality (city/county) from GADM administrative boundaries:
+
+  1. Create point geometry from POI coordinates
+  2. Perform spatial join with GADM boundaries
+  3. Extract NAME_2 (second-level admin division) as locality
+  4. This replaces source locality for accuracy
+
+  Example: Coordinates (34.052, -118.243) -> "Los Angeles"
+
+  Note: Requires GADM_PATH environment variable to be set.
+  If GADM boundaries not available, locality will be None.
+  ```
+
+#### 13. `inside_establishment_flag`
 - **Source**: `inside_places`
 - **Transformer**: `EstablishmentTransformer.detect_inside_establishment()`
 - **Logic**:
@@ -235,7 +271,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   Otherwise -> "no"
   ```
 
-#### 12. `parent_establishment_name`
+#### 14. `parent_establishment_name`
 - **Source**: `inside_places`
 - **Transformer**: `EstablishmentTransformer.extract_parent_name()`
 - **Logic**:
@@ -247,7 +283,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   Example: "Mall of America, Level 2" -> "Mall of America"
   ```
 
-#### 13. `parent_establishment_type`
+#### 15. `parent_establishment_type`
 - **Source**: `inside_places_categories`
 - **Transformer**: `EstablishmentTransformer.extract_parent_type()`
 - **Logic**:
@@ -265,7 +301,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   - Other -> "Other"
   ```
 
-#### 14. `floor_level`
+#### 16. `floor_level`
 - **Source**: `floor_no`
 - **Transformer**: `EstablishmentTransformer.normalize_floor_level()`
 - **Logic**:
@@ -277,7 +313,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   - Already prefixed (L1, B1) -> uppercase
   ```
 
-#### 15. `price_level`
+#### 17. `price_level`
 - **Source**: `price_level` or `price_range`
 - **Transformer**: `MetricsTransformer.standardize_price_level()`
 - **Logic**:
@@ -298,7 +334,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   - avg >= $75 -> 5
   ```
 
-#### 16. `average_stay_duration_minutes`
+#### 18. `average_stay_duration_minutes`
 - **Source**: `time_spent`
 - **Transformer**: `MetricsTransformer.parse_duration_minutes()`
 - **Logic**:
@@ -315,7 +351,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   - "up to X hours" takes priority
   ```
 
-#### 17. `traffic_score`
+#### 19. `traffic_score`
 - **Source**: `popular_times_data` or `popular_times_data_kg`
 - **Transformer**: `MetricsTransformer.calculate_traffic_score()`
 - **Logic**:
@@ -334,7 +370,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   Result rounded to 2 decimal places
   ```
 
-#### 18. `status_change`
+#### 20. `status_change`
 - **Source**: `oldest_date`, `business_status`, multi-version comparison
 - **Transformer**: `StatusTransformer.determine_status_change()`
 - **Logic**:
@@ -358,7 +394,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   - Set PATHS_CSV environment variable to use a CSV with S3 paths
   ```
 
-#### 19. `open_date`
+#### 21. `open_date`
 - **Source**: `oldest_date`
 - **Transformer**: `StatusTransformer.parse_open_date()`
 - **Logic**:
@@ -373,7 +409,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   - MM/DD/YYYY
   ```
 
-#### 20. `closed_date`
+#### 22. `closed_date`
 - **Source**: Multi-version comparison
 - **Transformer**: `StatusTransformer.compare_versions()`
 - **Logic**:
@@ -382,7 +418,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   Set when a POI's status changes from "Open" to "Closed" or "Temporarily Closed".
   ```
 
-#### 21. `last_verified_date`
+#### 23. `last_verified_date`
 - **Source**: `day_time`
 - **Transformer**: `StatusTransformer.parse_date()`
 - **Logic**:
@@ -397,7 +433,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   Fallback: Current date if unparseable
   ```
 
-#### 22. `data_version_month`
+#### 24. `data_version_month`
 - **Source**: Filename pattern
 - **Transformer**: `QualityTransformer.extract_month_from_filename()`
 - **Logic**:
@@ -407,7 +443,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   Result: "2025-05" (YYYY-MM format)
   ```
 
-#### 23. `verification_confidence_score`
+#### 25. `verification_confidence_score`
 - **Source**: Multiple fields
 - **Transformer**: `QualityTransformer.calculate_confidence_score()`
 - **Logic**:
@@ -429,7 +465,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   Total capped at 100
   ```
 
-#### 24. `data_quality_flag`
+#### 26. `data_quality_flag`
 - **Source**: `is_claimed`, `rating_count`, `review_count`
 - **Transformer**: `QualityTransformer.assess_data_quality()`
 - **Logic**:
@@ -441,7 +477,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   - "Low Confidence": Everything else (no reviews, not claimed)
   ```
 
-#### 25. `phone` (validated)
+#### 27. `phone` (validated)
 - **Source**: `phone`
 - **Transformer**: `QualityTransformer.validate_phone()`
 - **Logic**:
@@ -453,7 +489,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   4. If invalid -> None
   ```
 
-#### 26. `review_count`
+#### 28. `review_count`
 - **Source**: `reviews`
 - **Transformer**: `QualityTransformer.extract_review_count()`
 - **Logic**:
@@ -468,7 +504,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   3. If unparseable -> None
   ```
 
-#### 27. `open_hours`
+#### 29. `open_hours`
 - **Source**: `open_hours`
 - **Transformer**: `QualityTransformer.reformat_open_hours()`
 - **Logic**:
