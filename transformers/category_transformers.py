@@ -65,14 +65,21 @@ class CategoryTransformer:
                 if not original:
                     continue
 
+                # Mapping:
+                # meta_category -> category_level_1
+                # middle_category -> category_level_2
+                # target_category -> category_level_3
+                # category_main (original_category) -> category_level_4
                 level_1 = self._get_value(row, 'meta_category')
                 level_2 = self._get_value(row, 'middle_category')
                 level_3 = self._get_value(row, 'target_category')
+                level_4 = self._get_value(row, 'original_category')
 
                 self.category_map[original] = {
                     'level_1': level_1,
                     'level_2': level_2,
                     'level_3': level_3,
+                    'level_4': level_4,
                 }
 
             except Exception as e:
@@ -91,13 +98,13 @@ class CategoryTransformer:
     def map_category(self, category_main: Any) -> Dict[str, Optional[str]]:
         """Map original category to hierarchical levels."""
         if pd.isna(category_main):
-            return {'level_1': None, 'level_2': None, 'level_3': None}
+            return {'level_1': None, 'level_2': None, 'level_3': None, 'level_4': None}
 
         key = str(category_main).lower().strip()
         if key in self.category_map:
             return self.category_map[key]
 
-        return {'level_1': None, 'level_2': None, 'level_3': None}
+        return {'level_1': None, 'level_2': None, 'level_3': None, 'level_4': None}
 
     def transform_categories(self, df: pd.DataFrame) -> pd.DataFrame:
         """Apply category mapping to DataFrame."""
@@ -108,12 +115,14 @@ class CategoryTransformer:
             result['category_level_1'] = None
             result['category_level_2'] = None
             result['category_level_3'] = None
+            result['category_level_4'] = None
             return result
 
         mapped = df['category_main'].apply(self.map_category)
         result['category_level_1'] = mapped.apply(lambda x: x['level_1'])
         result['category_level_2'] = mapped.apply(lambda x: x['level_2'])
         result['category_level_3'] = mapped.apply(lambda x: x['level_3'])
+        result['category_level_4'] = mapped.apply(lambda x: x['level_4'])
 
         return result
 
