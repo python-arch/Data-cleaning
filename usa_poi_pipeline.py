@@ -105,6 +105,9 @@ class USAPOIPipeline:
             'removed_invalid_coords': 0,
         }
 
+        # Store processed versions for comparison
+        self.processed_versions: Dict[str, pd.DataFrame] = {}
+
     @staticmethod
     def extract_month_from_filename(filename: str) -> Optional[str]:
         match = re.search(r'(\d{8})', filename)
@@ -127,7 +130,7 @@ class USAPOIPipeline:
             'inside_places_ids', 'open_hours', 'time_spent', 'price_level',
             'popular_times_data', 'popular_times_data_kg', 'describe_data',
             'zone', 'zone_main', 'timeoffset', 'hotel_stars', 'hotel_price',
-            'day_time', 'photo_dates', 'review_dates', 'oldest_date',
+            'day_time', 'photo_dates', 'review_dates', 'oldest_date', 'reviews',
         ]
 
     def _validate_input_columns(self, df: pd.DataFrame) -> None:
@@ -169,7 +172,8 @@ class USAPOIPipeline:
             self.logger.debug(f"Removed {removed:,} rows outside USA")
         return df
 
-    def _apply_transformations(self, df: pd.DataFrame, data_version_month: str) -> pd.DataFrame:
+    def _apply_transformations(self, df: pd.DataFrame, data_version_month: str,
+                                version_comparison: Optional[Dict[str, str]] = None) -> pd.DataFrame:
         df = self.core_transformer.transform_batch(df)
 
         initial_rows = len(df)
@@ -181,10 +185,16 @@ class USAPOIPipeline:
 
         df = self.location_transformer.transform_batch(df)
         df = self.category_transformer.transform_batch(df)
-        df = self.status_transformer.transform_batch(df, data_version_month)
+        df = self.status_transformer.transform_batch(df, data_version_month, version_comparison)
         df = self.metrics_transformer.transform_batch(df)
         df = self.establishment_transformer.transform_batch(df)
         df = self.quality_transformer.transform_batch(df, data_version_month)
+
+        # Map locality and region columns
+        if 'locality' not in df.columns and 'locality' in df.columns:
+            pass  # Already named correctly
+        if 'region' not in df.columns and 'region_level_1' in df.columns:
+            df['region'] = df['region_level_1']
 
         return df
 
@@ -200,7 +210,8 @@ class USAPOIPipeline:
 
         return df[output_cols]
 
-    def process_chunk(self, chunk: pd.DataFrame, data_version_month: str) -> pd.DataFrame:
+    def process_chunk(self, chunk: pd.DataFrame, data_version_month: str,
+                      version_comparison: Optional[Dict[str, str]] = None) -> pd.DataFrame:
         self.logger.debug(f"Processing chunk: {len(chunk):,} rows")
 
         self._validate_input_columns(chunk)
@@ -217,12 +228,12 @@ class USAPOIPipeline:
 
         self.logger.debug(f"USA records: {len(chunk):,}")
 
-        chunk = self._apply_transformations(chunk, data_version_month)
+        chunk = self._apply_transformations(chunk, data_version_month, version_comparison)
         chunk = self._select_output_columns(chunk)
 
         return chunk
 
-    def process_file(self, object_key: str) -> Optional[pd.DataFrame]:
+    def process_file(self, object_key: str, previous_version_df: Optional[pd.DataFrame] = None) -> Optional[pd.DataFrame]:
         data_version_month = self.extract_month_from_filename(object_key)
         path_parts = object_key.split('/')
         date_str = path_parts[-2] if len(path_parts) >= 2 else ''
@@ -233,7 +244,11 @@ class USAPOIPipeline:
         if os.path.exists(local_save_csv_path):
             self.logger.info(f"Skipping {object_key} - already processed")
             self.stats['files_skipped'] += 1
-            return None
+            # Load existing file for version comparison
+            try:
+                return pd.read_csv(local_save_csv_path)
+            except:
+                return None
 
         zip_filename = os.path.basename(object_key)
         local_zip_path = os.path.join(self.local_download_path, zip_filename)
@@ -242,6 +257,12 @@ class USAPOIPipeline:
         self.logger.info(f"Output: {output_filename}")
 
         file_start_time = time.time()
+
+        # Prepare version comparison if previous version available
+        version_comparison = None
+        if previous_version_df is not None:
+            self.logger.info("Comparing with previous version for status changes...")
+            self.status_transformer.set_previous_version(previous_version_df)
 
         try:
             self.logger.info("Downloading from S3...")
@@ -276,7 +297,12 @@ class USAPOIPipeline:
 
                 self.logger.info(f"Chunk {chunk_number}: {len(chunk):,} input rows")
 
-                processed_chunk = self.process_chunk(chunk, data_version_month)
+                # For first chunk, do version comparison if available
+                chunk_version_comparison = None
+                if chunk_number == 1 and previous_version_df is not None:
+                    chunk_version_comparison = self.status_transformer.compare_versions(chunk)
+
+                processed_chunk = self.process_chunk(chunk, data_version_month, chunk_version_comparison)
 
                 if not processed_chunk.empty:
                     all_chunks.append(processed_chunk)
@@ -320,7 +346,62 @@ class USAPOIPipeline:
             if os.path.exists(local_zip_path):
                 os.remove(local_zip_path)
 
+    def run_from_csv(self, paths_csv: str):
+        """
+        Run pipeline for multiple versions from a CSV file containing S3 paths.
+
+        The CSV should have a 'Path' column with S3 object keys like:
+        "United States/20250114/United States.zip"
+        "United States/20250202/United States.zip"
+        ...
+
+        Each consecutive pair of versions will be compared for status_change.
+
+        Args:
+            paths_csv: Path to CSV file with S3 paths
+        """
+        self.logger.info("=" * 60)
+        self.logger.info("USA POI DATA PIPELINE - MULTI-VERSION MODE")
+        self.logger.info("=" * 60)
+        self.logger.info(f"Start: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        self.logger.info(f"Bucket: {self.s3_bucket_name}")
+        self.logger.info(f"Paths CSV: {paths_csv}")
+        self.logger.info("=" * 60)
+
+        start_time = time.time()
+
+        # Read paths CSV
+        paths_df = pd.read_csv(paths_csv)
+        if 'Path' not in paths_df.columns:
+            raise ValueError("CSV must have 'Path' column")
+
+        paths = paths_df['Path'].tolist()
+        self.logger.info(f"Found {len(paths)} versions to process")
+
+        # Sort paths by date to ensure chronological order
+        paths = sorted(paths, key=lambda x: re.search(r'(\d{8})', x).group(1) if re.search(r'(\d{8})', x) else '')
+
+        previous_version_df = None
+
+        for i, object_key in enumerate(paths):
+            self.logger.info(f"\n{'='*60}")
+            self.logger.info(f"VERSION {i+1}/{len(paths)}: {object_key}")
+            self.logger.info(f"{'='*60}")
+
+            # Process file with comparison to previous version
+            current_version_df = self.process_file(object_key, previous_version_df)
+
+            # Store current version for next iteration
+            if current_version_df is not None:
+                previous_version_df = current_version_df
+                self.processed_versions[object_key] = current_version_df
+
+        total_time = time.time() - start_time
+
+        self._print_summary(total_time)
+
     def run(self, prefix_filter: str = 'United States/2'):
+        """Run pipeline for all files matching the prefix filter."""
         self.logger.info("=" * 60)
         self.logger.info("USA POI DATA PIPELINE")
         self.logger.info("=" * 60)
@@ -334,6 +415,8 @@ class USAPOIPipeline:
         paginator = self.s3_client.get_paginator('list_objects_v2')
         pages = paginator.paginate(Bucket=self.s3_bucket_name)
 
+        # Collect all matching files
+        matching_files = []
         for page in pages:
             if 'Contents' not in page:
                 continue
@@ -342,10 +425,31 @@ class USAPOIPipeline:
                 object_key = obj['Key']
 
                 if prefix_filter in object_key and 'big_categories_data' not in object_key:
-                    self.process_file(object_key)
+                    matching_files.append(object_key)
+
+        # Sort by date
+        matching_files = sorted(matching_files, key=lambda x: re.search(r'(\d{8})', x).group(1) if re.search(r'(\d{8})', x) else '')
+
+        self.logger.info(f"Found {len(matching_files)} files to process")
+
+        previous_version_df = None
+
+        for i, object_key in enumerate(matching_files):
+            self.logger.info(f"\n{'='*60}")
+            self.logger.info(f"VERSION {i+1}/{len(matching_files)}: {object_key}")
+            self.logger.info(f"{'='*60}")
+
+            current_version_df = self.process_file(object_key, previous_version_df)
+
+            if current_version_df is not None:
+                previous_version_df = current_version_df
 
         total_time = time.time() - start_time
 
+        self._print_summary(total_time)
+
+    def _print_summary(self, total_time: float):
+        """Print pipeline summary."""
         self.logger.info("=" * 60)
         self.logger.info("PIPELINE COMPLETE")
         self.logger.info("=" * 60)
@@ -437,15 +541,13 @@ def main():
         logger=logger,
     )
 
-    try:
+    # Check if paths CSV is provided
+    paths_csv = os.getenv('PATHS_CSV')
+    if paths_csv and os.path.exists(paths_csv):
+        logger.info(f"Using paths CSV: {paths_csv}")
+        pipeline.run_from_csv(paths_csv)
+    else:
         pipeline.run()
-    except KeyboardInterrupt:
-        logger.warning("Pipeline interrupted by user")
-    except Exception as e:
-        logger.error(f"Fatal error: {e}")
-        import traceback
-        logger.debug(traceback.format_exc())
-        raise
 
 
 if __name__ == '__main__':

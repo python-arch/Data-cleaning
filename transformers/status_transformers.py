@@ -5,7 +5,6 @@ import numpy as np
 import re
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Set
-from collections import defaultdict
 
 
 class StatusTransformer:
@@ -23,9 +22,9 @@ class StatusTransformer:
 
     def __init__(self):
         """Initialize StatusTransformer"""
-        self.poi_history: Dict[str, List[Dict]] = {}
-        self.poi_dates: Dict[str, Dict] = {}
-        self.first_dataset_month: Optional[str] = None
+        # For multi-version comparison
+        self.previous_version_pois: Dict[str, str] = {}  # poi_id -> status
+        self.current_version_pois: Dict[str, str] = {}   # poi_id -> status
 
     # ========================================================================
     # Status Normalization
@@ -39,7 +38,7 @@ class StatusTransformer:
             status: Raw status string
 
         Returns:
-            Normalized status: Open, Closed, or Temporarily Closed
+            Normalized status: Open, Closed, Temporarily Closed, or Unknown
         """
         if pd.isna(status):
             return 'Unknown'
@@ -135,134 +134,107 @@ class StatusTransformer:
             return f"{year}-{month}"
         return None
 
-    # ========================================================================
-    # Historical Status Tracking
-    # ========================================================================
-
-    def reset_history(self):
-        """Reset POI history tracking"""
-        self.poi_history = {}
-        self.poi_dates = {}
-        self.first_dataset_month = None
-
-    def add_to_history(self, poi_id: str, month: str, status: str):
+    @staticmethod
+    def extract_month_from_date(date_str: Any) -> Optional[str]:
         """
-        Add POI status to history
+        Extract YYYY-MM from a date string
 
         Args:
-            poi_id: POI identifier
-            month: Month string (YYYY-MM)
-            status: Normalized status
-        """
-        if poi_id not in self.poi_history:
-            self.poi_history[poi_id] = []
+            date_str: Date string in various formats
 
-        self.poi_history[poi_id].append({
-            'month': month,
-            'status': status.lower()
-        })
-
-    def build_history_from_dataframe(self, df: pd.DataFrame, month: str):
+        Returns:
+            Month string (YYYY-MM) or None
         """
-        Build POI history from a DataFrame
+        parsed = StatusTransformer.parse_date(date_str)
+        if parsed:
+            return parsed[:7]  # YYYY-MM
+        return None
+
+    # ========================================================================
+    # Multi-Version Comparison
+    # ========================================================================
+
+    def reset_version_tracking(self):
+        """Reset version tracking for new comparison"""
+        self.previous_version_pois = {}
+        self.current_version_pois = {}
+
+    def set_previous_version(self, df: pd.DataFrame):
+        """
+        Store POI statuses from previous version for comparison
 
         Args:
             df: DataFrame with poi_id and status columns
-            month: Month string for this dataset
         """
-        if self.first_dataset_month is None:
-            self.first_dataset_month = month
+        self.previous_version_pois = {}
+        if 'poi_id' in df.columns and 'status' in df.columns:
+            for _, row in df.iterrows():
+                poi_id = str(row['poi_id'])
+                status = self.normalize_status(row.get('business_status', row.get('status', 'Unknown')))
+                self.previous_version_pois[poi_id] = status
 
-        for _, row in df.iterrows():
-            poi_id = str(row['poi_id'])
-            status = self.normalize_status(row.get('status', 'Unknown'))
-            self.add_to_history(poi_id, month, status)
-
-    def calculate_poi_dates(self):
+    def compare_versions(self, current_df: pd.DataFrame) -> Dict[str, str]:
         """
-        Calculate open_date and closed_date for all POIs based on history
-
-        Edge cases handled:
-        - Boundary guard: No close_date if never seen open and first record is closed
-        - Reopening detection: No close_date if POI reopened after closure
-        """
-        for poi_id, history in self.poi_history.items():
-            # Sort history by month
-            history.sort(key=lambda x: x['month'])
-
-            first_appearance = history[0]
-
-            # Determine open_date (None if in first month)
-            if first_appearance['month'] == self.first_dataset_month:
-                open_date = None
-            else:
-                open_date = first_appearance['month']
-
-            # Find LAST time POI was open
-            last_open_idx = None
-            for i, record in enumerate(history):
-                if record['status'] in self.OPEN_STATUSES:
-                    last_open_idx = i
-
-            # Start looking for closures AFTER last open
-            start_idx = (last_open_idx + 1) if last_open_idx is not None else 0
-
-            # Find FIRST closure after last open
-            first_close_idx = None
-            for i in range(start_idx, len(history)):
-                if history[i]['status'] in self.CLOSED_STATUSES:
-                    first_close_idx = i
-                    break
-
-            close_date = None
-
-            if first_close_idx is not None:
-                # EDGE CASE 1: Boundary guard
-                if last_open_idx is None and first_close_idx == 0:
-                    close_date = None
-                else:
-                    # EDGE CASE 2: Check for reopening after closure
-                    reopened = False
-                    for i in range(first_close_idx + 1, len(history)):
-                        if history[i]['status'] in self.OPEN_STATUSES:
-                            reopened = True
-                            break
-
-                    if not reopened:
-                        close_month = history[first_close_idx]['month']
-                        # Don't record if closure is in first month
-                        if close_month != self.first_dataset_month:
-                            close_date = close_month
-
-            self.poi_dates[poi_id] = {
-                'open_date': open_date,
-                'closed_date': close_date,
-                'history': history
-            }
-
-    def get_status_change(self, poi_id: str, current_month: str) -> Optional[str]:
-        """
-        Determine status change for a POI in a specific month
+        Compare current version with previous version to detect status changes
 
         Args:
-            poi_id: POI identifier
-            current_month: Current month (YYYY-MM)
+            current_df: Current version DataFrame with poi_id and status
+
+        Returns:
+            Dict mapping poi_id to status change ('Opened this month' or 'Closed this month')
+        """
+        status_changes = {}
+
+        for _, row in current_df.iterrows():
+            poi_id = str(row['poi_id'])
+            current_status = self.normalize_status(row.get('business_status', row.get('status', 'Unknown')))
+
+            if poi_id in self.previous_version_pois:
+                prev_status = self.previous_version_pois[poi_id]
+
+                # Check if status changed from open to closed
+                if prev_status == 'Open' and current_status in ['Closed', 'Temporarily Closed']:
+                    status_changes[poi_id] = 'Closed this month'
+                # Check if status changed from closed to open
+                elif prev_status in ['Closed', 'Temporarily Closed'] and current_status == 'Open':
+                    status_changes[poi_id] = 'Opened this month'
+            else:
+                # New POI in current version - check if it opened this month
+                if current_status == 'Open':
+                    status_changes[poi_id] = 'Opened this month'
+
+        return status_changes
+
+    def determine_status_change(self, row: pd.Series, data_version_month: str,
+                                 version_comparison: Optional[Dict[str, str]] = None) -> Optional[str]:
+        """
+        Determine status_change for a POI based on oldest_date and version comparison
+
+        Logic:
+        1. If oldest_date month matches processing month AND status is Open -> 'Opened this month'
+        2. If version_comparison has a status change for this POI, use it
+        3. Otherwise -> None
+
+        Args:
+            row: DataFrame row
+            data_version_month: Processing month (YYYY-MM)
+            version_comparison: Optional dict from compare_versions
 
         Returns:
             'Opened this month', 'Closed this month', or None
         """
-        if poi_id not in self.poi_dates:
-            return None
+        poi_id = str(row.get('poi_id', ''))
+        status = row.get('status', 'Unknown')
+        oldest_date = row.get('oldest_date')
 
-        dates = self.poi_dates[poi_id]
-
-        # Check if opened this month
-        if dates['open_date'] == current_month:
+        # Check if opened this month based on oldest_date
+        oldest_month = self.extract_month_from_date(oldest_date)
+        if oldest_month == data_version_month and status == 'Open':
             return 'Opened this month'
 
-        # Check if closed this month
-        if dates['closed_date'] == current_month:
-            return 'Closed this month'
+        # Check version comparison if available
+        if version_comparison and poi_id in version_comparison:
+            return version_comparison[poi_id]
 
         return None
 
@@ -270,13 +242,15 @@ class StatusTransformer:
     # Batch Transformations
     # ========================================================================
 
-    def transform_batch(self, df: pd.DataFrame, data_version_month: Optional[str] = None) -> pd.DataFrame:
+    def transform_batch(self, df: pd.DataFrame, data_version_month: Optional[str] = None,
+                        version_comparison: Optional[Dict[str, str]] = None) -> pd.DataFrame:
         """
         Apply all status transformations to a DataFrame
 
         Args:
             df: Input DataFrame
-            data_version_month: Month string for this dataset
+            data_version_month: Month string for this dataset (YYYY-MM)
+            version_comparison: Optional dict from compare_versions for status_change
 
         Returns:
             DataFrame with transformed columns
@@ -288,6 +262,8 @@ class StatusTransformer:
             result['status'] = self.normalize_status_vectorized(df['business_status'])
         elif 'status' in df.columns:
             result['status'] = self.normalize_status_vectorized(df['status'])
+        else:
+            result['status'] = 'Unknown'
 
         # Parse last verified date
         if 'day_time' in df.columns:
@@ -295,25 +271,22 @@ class StatusTransformer:
         else:
             result['last_verified_date'] = datetime.today().strftime('%Y-%m-%d')
 
-        # Parse open date from oldest_date if available
+        # Parse open date from oldest_date (sole source)
         if 'oldest_date' in df.columns:
             result['open_date'] = df['oldest_date'].apply(self.parse_open_date)
         else:
             result['open_date'] = None
 
-        # Initialize other columns
+        # closed_date is determined by version comparison only
         result['closed_date'] = None
-        result['status_change'] = None
 
-        # If we have historical data, use it
-        if self.poi_dates and 'poi_id' in result.columns:
-            for idx, row in result.iterrows():
-                poi_id = str(row['poi_id'])
-                if poi_id in self.poi_dates:
-                    dates = self.poi_dates[poi_id]
-                    result.at[idx, 'open_date'] = dates['open_date']
-                    result.at[idx, 'closed_date'] = dates['closed_date']
-                    if data_version_month:
-                        result.at[idx, 'status_change'] = self.get_status_change(poi_id, data_version_month)
+        # Determine status_change
+        if data_version_month:
+            result['status_change'] = result.apply(
+                lambda row: self.determine_status_change(row, data_version_month, version_comparison),
+                axis=1
+            )
+        else:
+            result['status_change'] = None
 
         return result

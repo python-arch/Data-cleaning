@@ -20,6 +20,12 @@ A modular, production-ready pipeline for processing Point of Interest (POI) data
 
 This pipeline processes raw POI data from an S3 bucket, applies data cleaning rules, transforms fields into a standardized schema, and outputs clean CSV files. The architecture uses a modular transformer pattern, where each transformer handles a specific domain of transformations.
 
+**Key Features:**
+- Multi-version processing with status change detection between consecutive versions
+- 4-level category hierarchy mapping
+- Quality scoring based on verification signals
+- Simplified open hours format for better readability
+
 ---
 
 ## Feature Origins
@@ -56,15 +62,14 @@ These fields are taken directly from the source data with minimal or no transfor
 | `latitude` | `latitude` | Privacy noise added (see Derived Features) |
 | `longitude` | `longitude` | Privacy noise added (see Derived Features) |
 | `street` | `street` | Direct copy |
-| `city` | `locality` | Direct copy (column rename) |
-| `state` | `region_level_1` | Direct copy (column rename) |
+| `locality` | `locality` | Direct copy |
+| `region` | `region_level_1` | Direct copy (column rename) |
 | `country_code` | `country` | Direct copy |
 | `country_isocode` | `country` | Direct copy |
-| `review_count` | `rating_count` | Direct copy (column rename) |
+| `rating_count` | `rating_count` | Direct copy |
 | `average_rating` | `rating` | Direct copy (validated 0-5 range) |
 | `hotel_star_rating` | `hotel_stars` | Direct copy |
 | `floor_level` | `floor_no` | Normalized format (see Derived Features) |
-| `open_hours` | `open_hours` | Direct copy |
 | `website_domain` | `website_domain` | Direct copy |
 | `phone` | `phone` | Validated format (see Derived Features) |
 
@@ -107,7 +112,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   Priority: (name + domain) > name only > domain only
   ```
 
-#### 4. `category_level_1`, `category_level_2`, `category_level_3`
+#### 4. `category_level_1`, `category_level_2`, `category_level_3`, `category_level_4`
 - **Source**: `category_main` + category mapping file
 - **Transformer**: `CategoryTransformer.transform_categories()`
 - **Logic**:
@@ -116,6 +121,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   - category_level_1 = meta_category (broadest, e.g., "Food & Beverage")
   - category_level_2 = middle_category (e.g., "Restaurants & Eateries")
   - category_level_3 = target_category (most specific, e.g., "Fast Food Restaurant")
+  - category_level_4 = original_category (original category_main value)
   ```
 
 #### 5. `dining_type`
@@ -171,10 +177,10 @@ These fields are computed or derived from one or more source columns. Each inclu
   ```
   Normalize to: "Open", "Closed", "Temporarily Closed", or "Unknown"
 
-  Mapping:
-  - "open", "open 24 hours", "operational" -> "Open"
-  - "closed", "permanently closed" -> "Closed"
-  - "closed_temporarily", "temporarily closed" -> "Temporarily Closed"
+  Mapping (only values present in source data):
+  - "open", "open 24 hours" -> "Open"
+  - "permanently closed" -> "Closed"
+  - "temporarily closed" -> "Temporarily Closed"
   - Other/null -> "Unknown"
   ```
 
@@ -329,45 +335,49 @@ These fields are computed or derived from one or more source columns. Each inclu
   ```
 
 #### 18. `status_change`
-- **Source**: Multi-month history tracking
-- **Transformer**: `StatusTransformer.get_status_change()`
+- **Source**: `oldest_date`, `business_status`, multi-version comparison
+- **Transformer**: `StatusTransformer.determine_status_change()`
 - **Logic**:
   ```
-  Compare status across monthly datasets:
-  - If POI first appeared this month -> "Opened this month"
-  - If POI status changed to closed this month -> "Closed this month"
-  - Otherwise -> None
+  Determine if POI opened or closed this month:
 
-  Edge cases handled:
-  - Boundary guard: No close_date if never seen open and first record is closed
-  - Reopening detection: No close_date if POI reopened after closure
+  1. Based on oldest_date:
+     - If oldest_date month = processing month AND status is "Open" -> "Opened this month"
+
+  2. Based on consecutive version comparison:
+     - Compare POI status between version N and version N+1
+     - If status changed from "Open" to "Closed"/"Temporarily Closed" -> "Closed this month"
+     - If status changed from "Closed" to "Open" -> "Opened this month"
+     - If POI is new in current version with status "Open" -> "Opened this month"
+
+  Multi-version processing:
+  - Pipeline processes versions chronologically
+  - Each consecutive pair is compared for status changes
+  - Set PATHS_CSV environment variable to use a CSV with S3 paths
   ```
 
 #### 19. `open_date`
-- **Source**: `oldest_date` or multi-month history
+- **Source**: `oldest_date`
 - **Transformer**: `StatusTransformer.parse_open_date()`
 - **Logic**:
   ```
-  Primary: Parse oldest_date field (YYYY-MM-DD format)
-  Secondary: First appearance month in multi-month tracking
+  Parse oldest_date field to YYYY-MM-DD format.
+  This is the sole source for open_date (no multi-month history aggregation).
 
-  If POI existed in first dataset month -> None
-  Otherwise -> First appearance month (YYYY-MM)
+  Supported formats:
+  - YYYY-MM-DD
+  - YYYY-MM-DDTHH:MM:SS
+  - DD-MM-YYYY
+  - MM/DD/YYYY
   ```
 
 #### 20. `closed_date`
-- **Source**: Multi-month history tracking
-- **Transformer**: `StatusTransformer.calculate_poi_dates()`
+- **Source**: Multi-version comparison
+- **Transformer**: `StatusTransformer.compare_versions()`
 - **Logic**:
   ```
-  Track status changes across months:
-  1. Find last month POI was "open"
-  2. Find first "closed" status after last open
-  3. Apply edge case guards:
-     - If never seen open AND first record is closed -> None
-     - If POI reopened after closure -> None
-     - If closed in first dataset month -> None
-  4. Otherwise -> closure month (YYYY-MM)
+  Determined by comparing consecutive dataset versions.
+  Set when a POI's status changes from "Open" to "Closed" or "Temporarily Closed".
   ```
 
 #### 21. `last_verified_date`
@@ -429,14 +439,15 @@ These fields are computed or derived from one or more source columns. Each inclu
   ```
 
 #### 25. `data_quality_flag`
-- **Source**: Derived from confidence score
+- **Source**: `is_claimed`, `rating_count`, `review_count`
 - **Transformer**: `QualityTransformer.assess_data_quality()`
 - **Logic**:
   ```
-  Based on verification_confidence_score:
-  - Score >= 70 -> "Clean"
-  - Score >= 40 -> "Needs Review"
-  - Score < 40 -> "Low Confidence"
+  Based on verification signals:
+
+  - "Clean": is_claimed = true AND rating_count > 5 AND review_count > 3
+  - "Needs Review": rating_count >= 1 OR is_claimed = true
+  - "Low Confidence": Everything else (no reviews, not claimed)
   ```
 
 #### 26. `phone` (validated)
@@ -449,6 +460,44 @@ These fields are computed or derived from one or more source columns. Each inclu
   2. Validate number format
   3. If valid -> return original
   4. If invalid -> None
+  ```
+
+#### 27. `review_count`
+- **Source**: `reviews`
+- **Transformer**: `QualityTransformer.extract_review_count()`
+- **Logic**:
+  ```
+  Extract count from reviews JSON:
+
+  Input format:
+  {'reviews': [...], 'summary': {'count': 8, 'avg_rating': 3.75, ...}}
+
+  1. Try to get count from summary.count
+  2. Fallback: count length of reviews list
+  3. If unparseable -> None
+  ```
+
+#### 28. `open_hours`
+- **Source**: `open_hours`
+- **Transformer**: `QualityTransformer.reformat_open_hours()`
+- **Logic**:
+  ```
+  Reformat from complex JSON to simpler format:
+
+  Input format:
+  {
+    "Sunday": {"intervals": [{"start": "11:00", "end": "18:00"}], "is_24h": false, "closed": false},
+    ...
+  }
+
+  Output format (simpler JSON):
+  {"Mon": "11:00-18:00", "Tue": "11:00-18:00", ..., "Sun": "Closed"}
+
+  Rules:
+  - is_24h = true -> "24 hours"
+  - closed = true -> "Closed"
+  - Multiple intervals joined with ", "
+  - Days abbreviated (Mon, Tue, Wed, Thu, Fri, Sat, Sun)
   ```
 
 ---
@@ -498,8 +547,22 @@ cp .env.example .env
 
 ## Usage
 
+### Single Run (Auto-discover files)
 ```bash
 # Run the pipeline
+python usa_poi_pipeline.py
+```
+
+### Multi-Version Processing (from CSV)
+```bash
+# Create a CSV file with S3 paths (paths.csv):
+# Path
+# "United States/20250114/United States.zip"
+# "United States/20250202/United States.zip"
+# ...
+
+# Set environment variable and run
+export PATHS_CSV=paths.csv
 python usa_poi_pipeline.py
 ```
 
@@ -519,6 +582,7 @@ s3_bucket_name=your-bucket-name
 GADM_PATH=data/usa_admin.geojson
 CATEGORY_MAPPING_PATH=data/xmap_poi_categorization.csv
 BRAND_CONFIG_PATH=data/branding_usa_configs.csv
+PATHS_CSV=paths.csv  # For multi-version processing
 ```
 
 ---
