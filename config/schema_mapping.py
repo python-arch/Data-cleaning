@@ -201,3 +201,55 @@ PARENT_TYPE_MAPPING = {
     'bus_station': 'Transit Station',
     'subway_station': 'Transit Station',
 }
+
+# Restaurant category keywords for detection
+RESTAURANT_KEYWORDS = [
+    'restaurant', 'food', 'dining', 'cafe', 'deli', 'grill',
+    'kitchen', 'eatery', 'bistro', 'brasserie', 'cafeteria',
+    'chicken', 'seafood', 'pizza', 'burger', 'sandwich', 'taco',
+    'bar', 'steakhouse', 'sushi', 'bakery', 'coffee', 'juice',
+    'eateries', 'food court'
+]
+
+# Restaurant category level 2 matches (from xmap_poi)
+RESTAURANT_LEVEL2_CATEGORIES = [
+    'Restaurants & Eateries',
+    'Food & Dining Establishments',
+    'Food Court',
+    'Cafes & Coffee Shops',
+    'Bars & Nightlife',
+]
+
+# QSR (Quick Service Restaurant) brand keywords
+QSR_BRAND_KEYWORDS = [
+    'subway', 'pizza hut', 'burger king', 'starbucks', 'smoothie king',
+    'popeyes', 'chick-fil-a', 'dairy queen', 'papa johns', 'taco bell',
+    'wendy', 'mcdonald', 'kfc', 'arby', 'dunkin', 'chipotle', 'panera',
+    'five guys', 'in-n-out', 'sonic', 'jack in the box', 'whataburger',
+    'del taco', 'carl\'s jr', 'hardee', 'wingstop', 'jersey mike',
+    'firehouse subs', 'jimmy john', 'qdoba', 'moe\'s', 'raising cane'
+]
+
+# Dining type classification thresholds
+DINING_TYPE_THRESHOLDS = {
+    'QSR': 5,
+    'Fine Dining': 7,
+    'Family Dining': 6,
+    'Casual Dining': 4,
+}
+
+# Category level column name candidates for flexible schema support
+CATEGORY_COLUMN_CANDIDATES = {
+    'original': ['original_category', 'source_category', 'category', 'category_main'],
+    'level_1': ['meta_category', 'big_category', 'category_level_1', 'category_l1'],
+    'level_2': ['middle_category', 'mapped_category', 'category_level_2', 'category_l2'],
+    'level_3': ['target_category', 'final_category', 'category_level_3', 'category_l3'],
+}
+
+# Brand config column name candidates for flexible schema support
+BRAND_COLUMN_CANDIDATES = {
+    'name': ['name', 'poi_name', 'business_name', 'place_name'],
+    'domain': ['website_domain', 'domain', 'website', 'web_domain'],
+    'brand': ['brand_name', 'brand', 'chain_name', 'parent_brand'],
+    'category': ['original_category', 'category', 'user_category', 'category_main'],
+}

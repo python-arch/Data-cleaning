@@ -34,30 +34,111 @@ class CategoryTransformer:
         'firehouse subs', 'jimmy john', 'qdoba', 'moe\'s', 'raising cane'
     ]
 
+    # Column name mappings for flexible schema support
+    # Maps internal names to possible column names in source data
+    LEVEL1_COLUMNS = ['meta_category', 'big_category', 'category_level_1', 'category_l1']
+    LEVEL2_COLUMNS = ['middle_category', 'mapped_category', 'category_level_2', 'category_l2']
+    LEVEL3_COLUMNS = ['target_category', 'final_category', 'category_level_3', 'category_l3']
+    ORIGINAL_COLUMNS = ['original_category', 'source_category', 'category', 'category_main']
+
     def __init__(self, category_mapping_df: Optional[pd.DataFrame] = None):
         """
         Initialize CategoryTransformer
 
         Args:
             category_mapping_df: DataFrame with category mapping
-                Expected columns: original_category, target_category, middle_category, meta_category
+                Flexible schema - supports various column names:
+                - Original category: original_category, source_category, category, category_main
+                - Level 1 (meta): meta_category, big_category, category_level_1
+                - Level 2 (middle): middle_category, mapped_category, category_level_2
+                - Level 3 (target): target_category, final_category, category_level_3
         """
         self.category_mapping = category_mapping_df
+        self._column_mapping = {}
         self._build_category_index()
 
+    def _find_column(self, df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
+        """
+        Find the first matching column name from candidates
+
+        Args:
+            df: DataFrame to search
+            candidates: List of possible column names
+
+        Returns:
+            First matching column name or None
+        """
+        if df is None:
+            return None
+        for col in candidates:
+            if col in df.columns:
+                return col
+        return None
+
     def _build_category_index(self):
-        """Build efficient lookup for category mapping"""
+        """Build efficient lookup for category mapping with flexible column detection"""
         self.category_map = {}
 
-        if self.category_mapping is not None:
-            for _, row in self.category_mapping.iterrows():
-                original = str(row.get('original_category', '')).lower().strip()
-                if original:
-                    self.category_map[original] = {
-                        'level_1': row.get('meta_category'),
-                        'level_2': row.get('middle_category'),
-                        'level_3': row.get('target_category'),
-                    }
+        if self.category_mapping is None:
+            return
+
+        # Detect column names
+        original_col = self._find_column(self.category_mapping, self.ORIGINAL_COLUMNS)
+        level1_col = self._find_column(self.category_mapping, self.LEVEL1_COLUMNS)
+        level2_col = self._find_column(self.category_mapping, self.LEVEL2_COLUMNS)
+        level3_col = self._find_column(self.category_mapping, self.LEVEL3_COLUMNS)
+
+        # Store mapping for reference
+        self._column_mapping = {
+            'original': original_col,
+            'level_1': level1_col,
+            'level_2': level2_col,
+            'level_3': level3_col,
+        }
+
+        if original_col is None:
+            # No original category column found, cannot build mapping
+            return
+
+        for _, row in self.category_mapping.iterrows():
+            try:
+                original = row.get(original_col)
+                if pd.isna(original):
+                    continue
+
+                original = str(original).lower().strip()
+                if not original:
+                    continue
+
+                # Get category levels, handling missing columns gracefully
+                level_1 = None
+                level_2 = None
+                level_3 = None
+
+                if level1_col and pd.notna(row.get(level1_col)):
+                    level_1 = str(row.get(level1_col)).strip()
+                    if not level_1:
+                        level_1 = None
+
+                if level2_col and pd.notna(row.get(level2_col)):
+                    level_2 = str(row.get(level2_col)).strip()
+                    if not level_2:
+                        level_2 = None
+
+                if level3_col and pd.notna(row.get(level3_col)):
+                    level_3 = str(row.get(level3_col)).strip()
+                    if not level_3:
+                        level_3 = None
+
+                self.category_map[original] = {
+                    'level_1': level_1,
+                    'level_2': level_2,
+                    'level_3': level_3,
+                }
+
+            except Exception:
+                # Skip malformed rows
+                continue
 
     # ========================================================================
     # Category Mapping
@@ -117,8 +198,27 @@ class CategoryTransformer:
         except:
             return {}
 
-    def _is_restaurant(self, category_main: str, categories_list: str) -> bool:
-        """Check if POI is a restaurant based on categories"""
+    def _is_restaurant(self, category_main: str, categories_list: str,
+                       category_level_2: Optional[str] = None) -> bool:
+        """
+        Check if POI is a restaurant based on categories
+
+        Args:
+            category_main: Original category from source data
+            categories_list: List of categories as string
+            category_level_2: Mapped middle category (e.g., "Restaurants & Eateries")
+
+        Returns:
+            True if POI is a restaurant, False otherwise
+        """
+        # Check mapped category first (most reliable)
+        if category_level_2 and pd.notna(category_level_2):
+            level2_lower = str(category_level_2).lower().strip()
+            if 'restaurant' in level2_lower or 'eateries' in level2_lower or \
+               'dining' in level2_lower or 'food' in level2_lower:
+                return True
+
+        # Check original category
         category_lower = str(category_main).lower() if pd.notna(category_main) else ''
         categories_lower = str(categories_list).lower() if pd.notna(categories_list) else ''
 
@@ -135,13 +235,25 @@ class CategoryTransformer:
         Returns:
             Dining type: QSR, Fine Dining, Family Dining, Casual Dining, or None
         """
-        category_main = str(row.get('category_main', '')).lower()
-        categories_list = str(row.get('categories_list', '')).lower()
-        name = str(row.get('name', '')).lower()
+        category_main = str(row.get('category_main', '')).lower() if pd.notna(row.get('category_main')) else ''
+        categories_list = str(row.get('categories_list', '')).lower() if pd.notna(row.get('categories_list')) else ''
+        name = str(row.get('name', '')).lower() if pd.notna(row.get('name')) else ''
+
+        # Get price level safely
         price_level = row.get('price_level')
+        if pd.isna(price_level):
+            price_level = None
+        else:
+            try:
+                price_level = int(price_level)
+            except (TypeError, ValueError):
+                price_level = None
+
+        # Get mapped category level 2 for restaurant detection
+        category_level_2 = row.get('category_level_2')
 
         # Check if it's a restaurant
-        if not self._is_restaurant(category_main, categories_list):
+        if not self._is_restaurant(category_main, categories_list, category_level_2):
             return None
 
         # Parse describe_data
@@ -266,9 +378,11 @@ class CategoryTransformer:
         Returns:
             DataFrame with transformed columns
         """
+        # First apply category mapping to get category_level_2
         result = self.transform_categories(df)
 
-        # Add dining type classification
-        result['dining_type'] = df.apply(self.classify_dining_type, axis=1)
+        # Add dining type classification (uses category_level_2 for restaurant detection)
+        # Note: We apply to result, not df, so category_level_2 is available
+        result['dining_type'] = result.apply(self.classify_dining_type, axis=1)
 
         return result

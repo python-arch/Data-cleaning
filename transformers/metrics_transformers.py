@@ -151,6 +151,11 @@ class MetricsTransformer:
         """
         Calculate traffic score from popular times data
 
+        Handles multiple traffic data schemas:
+        1. Processed format: {'popular_times': [{'day': '...', 'avg': 75}, ...]}
+        2. Raw format with day keys: {'Sunday': [..., {'average_popularity': X}, ...], ...}
+           - average_popularity is typically at index -3 (third from last)
+
         Args:
             traffic_data: Raw popular times data (string or dict)
 
@@ -161,39 +166,103 @@ class MetricsTransformer:
             return None
 
         try:
-            # Parse if string
+            # Parse if string - handle both single and double quotes
             if isinstance(traffic_data, str):
-                traffic_data = json.loads(traffic_data.replace("'", "\""))
+                traffic_str = traffic_data.strip()
+                if not traffic_str:
+                    return None
+                try:
+                    traffic_data = json.loads(traffic_str.replace("'", "\""))
+                except json.JSONDecodeError:
+                    # Try with ast.literal_eval as fallback for Python dict strings
+                    try:
+                        from ast import literal_eval
+                        traffic_data = literal_eval(traffic_str)
+                    except (ValueError, SyntaxError):
+                        return None
 
             if not isinstance(traffic_data, dict):
                 return None
 
-            # Check for processed format with 'popular_times' key
+            if not traffic_data:
+                return None
+
+            # Schema 1: Processed format with 'popular_times' key
             if 'popular_times' in traffic_data:
-                daily_avgs = [
-                    day.get('avg') for day in traffic_data['popular_times']
-                    if isinstance(day, dict) and 'avg' in day
-                ]
+                popular_times = traffic_data['popular_times']
+                if not isinstance(popular_times, list):
+                    return None
+
+                daily_avgs = []
+                for day in popular_times:
+                    if isinstance(day, dict) and 'avg' in day:
+                        avg_val = day.get('avg')
+                        if avg_val is not None:
+                            try:
+                                daily_avgs.append(float(avg_val))
+                            except (TypeError, ValueError):
+                                continue
+
                 if daily_avgs:
                     return round(sum(daily_avgs) / len(daily_avgs), 2)
+                return None
 
-            # Check for raw format with day names as keys
-            daily_scores = []
-            for day in ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']:
-                if day in traffic_data and isinstance(traffic_data[day], list):
-                    day_data = traffic_data[day]
-                    # Look for average_popularity entry
+            # Schema 2: Raw format with day names as keys
+            # average_popularity is at index -3 (third from last) in the day's list
+            valid_days_scores = []
+
+            # Check for any day keys (could be full names or abbreviations)
+            day_names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+            day_abbrevs = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+            for day_key in traffic_data.keys():
+                # Match full day names or abbreviations (case-insensitive)
+                if day_key in day_names or day_key in day_abbrevs or \
+                   day_key.lower() in [d.lower() for d in day_names] or \
+                   day_key.lower() in [d.lower() for d in day_abbrevs]:
+
+                    day_data = traffic_data[day_key]
+                    if isinstance(day_data, list) and len(day_data) >= 3:
+                        # Get average_popularity from third-to-last element
+                        try:
+                            entry = day_data[-3]
+                            if isinstance(entry, dict):
+                                avg_pop = entry.get('average_popularity')
+                                if avg_pop is not None:
+                                    try:
+                                        valid_days_scores.append(float(avg_pop))
+                                    except (TypeError, ValueError):
+                                        continue
+                        except (IndexError, TypeError):
+                            continue
+
+            # Filter out None values (already done, but be safe)
+            valid_days_scores = [v for v in valid_days_scores if v is not None]
+
+            if valid_days_scores:
+                return round(sum(valid_days_scores) / len(valid_days_scores), 2)
+
+            # Fallback: Try to find average_popularity anywhere in the structure
+            all_avgs = []
+            for day_key, day_data in traffic_data.items():
+                if isinstance(day_data, list):
                     for entry in day_data:
                         if isinstance(entry, dict) and 'average_popularity' in entry:
-                            daily_scores.append(entry['average_popularity'])
-                            break
+                            avg_pop = entry.get('average_popularity')
+                            if avg_pop is not None:
+                                try:
+                                    all_avgs.append(float(avg_pop))
+                                except (TypeError, ValueError):
+                                    continue
+                            break  # Only take one per day
 
-            if daily_scores:
-                return round(sum(daily_scores) / len(daily_scores), 2)
+            if all_avgs:
+                return round(sum(all_avgs) / len(all_avgs), 2)
 
             return None
 
-        except (json.JSONDecodeError, TypeError, KeyError):
+        except Exception:
+            # Catch-all for any unexpected errors
             return None
 
     def calculate_traffic_vectorized(self, traffic_series: pd.Series) -> pd.Series:
