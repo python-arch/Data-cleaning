@@ -139,7 +139,9 @@ class QualityTransformer:
                 if not hours_str:
                     return None
                 try:
-                    open_hours_data = json.loads(hours_str.replace("'", "\""))
+                    # Handle Python-style booleans (True/False) by converting to JSON-style (true/false)
+                    json_str = hours_str.replace("'", "\"").replace("True", "true").replace("False", "false").replace("None", "null")
+                    open_hours_data = json.loads(json_str)
                 except json.JSONDecodeError:
                     try:
                         open_hours_data = literal_eval(hours_str)
