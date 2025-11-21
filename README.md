@@ -347,8 +347,10 @@ These fields are computed or derived from one or more source columns. Each inclu
   2. Based on consecutive version comparison:
      - Compare POI status between version N and version N+1
      - If status changed from "Open" to "Closed"/"Temporarily Closed" -> "Closed this month"
-     - If status changed from "Closed" to "Open" -> "Opened this month"
-     - If POI is new in current version with status "Open" -> "Opened this month"
+     - If status changed from "Closed" to "Open" -> "Recently Opened"
+
+  Note: New POIs appearing in current version are NOT automatically marked as opened.
+  Only POIs with oldest_date matching the processing month get "Opened this month".
 
   Multi-version processing:
   - Pipeline processes versions chronologically
