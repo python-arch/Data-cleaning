@@ -303,7 +303,10 @@ class USAPOIPipeline:
                 # For first chunk, do version comparison if available
                 chunk_version_comparison = None
                 if chunk_number == 1 and previous_version_df is not None:
-                    chunk_version_comparison = self.status_transformer.compare_versions(chunk)
+                    # Need to hash google_id to poi_id for comparison (raw chunk doesn't have poi_id)
+                    temp_chunk = chunk.copy()
+                    temp_chunk['poi_id'] = temp_chunk['google_id'].apply(self.core_transformer.hash_poi_id)
+                    chunk_version_comparison = self.status_transformer.compare_versions(temp_chunk)
 
                 processed_chunk = self.process_chunk(chunk, data_version_month, chunk_version_comparison)
 
