@@ -1,14 +1,18 @@
 """Category transformations for hierarchical mapping and dining classification."""
 
+import logging
 import pandas as pd
 import numpy as np
-import re
 from typing import Optional, Dict, Any, List
 from ast import literal_eval
+
+logger = logging.getLogger(__name__)
 
 
 class CategoryTransformer:
     """Handles category hierarchy mapping and dining type classification."""
+
+    REQUIRED_MAPPING_COLUMNS = ['original_category', 'meta_category', 'middle_category', 'target_category']
 
     RESTAURANT_KEYWORDS = [
         'restaurant', 'food', 'dining', 'cafe', 'deli', 'grill',
@@ -26,24 +30,23 @@ class CategoryTransformer:
         'firehouse subs', 'jimmy john', 'qdoba', 'moe\'s', 'raising cane'
     ]
 
-    LEVEL1_COLUMNS = ['meta_category', 'big_category', 'category_level_1', 'category_l1']
-    LEVEL2_COLUMNS = ['middle_category', 'mapped_category', 'category_level_2', 'category_l2']
-    LEVEL3_COLUMNS = ['target_category', 'final_category', 'category_level_3', 'category_l3']
-    ORIGINAL_COLUMNS = ['original_category', 'source_category', 'category', 'category_main']
-
     def __init__(self, category_mapping_df: Optional[pd.DataFrame] = None):
         self.category_mapping = category_mapping_df
-        self._column_mapping = {}
+        self._validate_mapping()
         self._build_category_index()
 
-    def _find_column(self, df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
-        """Find the first matching column name from candidates."""
-        if df is None:
-            return None
-        for col in candidates:
-            if col in df.columns:
-                return col
-        return None
+    def _validate_mapping(self):
+        """Validate category mapping has required columns."""
+        if self.category_mapping is None:
+            logger.info("No category mapping provided, categories will be empty")
+            return
+
+        missing = [c for c in self.REQUIRED_MAPPING_COLUMNS if c not in self.category_mapping.columns]
+        if missing:
+            raise ValueError(f"Category mapping missing required columns: {missing}. "
+                           f"Expected: {self.REQUIRED_MAPPING_COLUMNS}")
+
+        logger.info(f"Category mapping validated: {len(self.category_mapping)} entries")
 
     def _build_category_index(self):
         """Build lookup index for category mapping."""
@@ -52,27 +55,9 @@ class CategoryTransformer:
         if self.category_mapping is None:
             return
 
-        # Detect column names
-        original_col = self._find_column(self.category_mapping, self.ORIGINAL_COLUMNS)
-        level1_col = self._find_column(self.category_mapping, self.LEVEL1_COLUMNS)
-        level2_col = self._find_column(self.category_mapping, self.LEVEL2_COLUMNS)
-        level3_col = self._find_column(self.category_mapping, self.LEVEL3_COLUMNS)
-
-        # Store mapping for reference
-        self._column_mapping = {
-            'original': original_col,
-            'level_1': level1_col,
-            'level_2': level2_col,
-            'level_3': level3_col,
-        }
-
-        if original_col is None:
-            # No original category column found, cannot build mapping
-            return
-
         for _, row in self.category_mapping.iterrows():
             try:
-                original = row.get(original_col)
+                original = row['original_category']
                 if pd.isna(original):
                     continue
 
@@ -80,25 +65,9 @@ class CategoryTransformer:
                 if not original:
                     continue
 
-                # Get category levels, handling missing columns gracefully
-                level_1 = None
-                level_2 = None
-                level_3 = None
-
-                if level1_col and pd.notna(row.get(level1_col)):
-                    level_1 = str(row.get(level1_col)).strip()
-                    if not level_1:
-                        level_1 = None
-
-                if level2_col and pd.notna(row.get(level2_col)):
-                    level_2 = str(row.get(level2_col)).strip()
-                    if not level_2:
-                        level_2 = None
-
-                if level3_col and pd.notna(row.get(level3_col)):
-                    level_3 = str(row.get(level3_col)).strip()
-                    if not level_3:
-                        level_3 = None
+                level_1 = self._get_value(row, 'meta_category')
+                level_2 = self._get_value(row, 'middle_category')
+                level_3 = self._get_value(row, 'target_category')
 
                 self.category_map[original] = {
                     'level_1': level_1,
@@ -106,8 +75,18 @@ class CategoryTransformer:
                     'level_3': level_3,
                 }
 
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Skipping malformed category row: {e}")
                 continue
+
+        logger.info(f"Category index built: {len(self.category_map)} mappings")
+
+    def _get_value(self, row: pd.Series, col: str) -> Optional[str]:
+        val = row.get(col)
+        if pd.isna(val):
+            return None
+        val = str(val).strip()
+        return val if val else None
 
     def map_category(self, category_main: Any) -> Dict[str, Optional[str]]:
         """Map original category to hierarchical levels."""
@@ -115,7 +94,6 @@ class CategoryTransformer:
             return {'level_1': None, 'level_2': None, 'level_3': None}
 
         key = str(category_main).lower().strip()
-
         if key in self.category_map:
             return self.category_map[key]
 
@@ -125,17 +103,22 @@ class CategoryTransformer:
         """Apply category mapping to DataFrame."""
         result = df.copy()
 
-        if 'category_main' in df.columns:
-            mapped = df['category_main'].apply(self.map_category)
-            result['category_level_1'] = mapped.apply(lambda x: x['level_1'])
-            result['category_level_2'] = mapped.apply(lambda x: x['level_2'])
-            result['category_level_3'] = mapped.apply(lambda x: x['level_3'])
+        if 'category_main' not in df.columns:
+            logger.warning("Missing category_main column, skipping category mapping")
+            result['category_level_1'] = None
+            result['category_level_2'] = None
+            result['category_level_3'] = None
+            return result
+
+        mapped = df['category_main'].apply(self.map_category)
+        result['category_level_1'] = mapped.apply(lambda x: x['level_1'])
+        result['category_level_2'] = mapped.apply(lambda x: x['level_2'])
+        result['category_level_3'] = mapped.apply(lambda x: x['level_3'])
 
         return result
 
     @staticmethod
     def safe_eval(val: Any) -> Dict:
-        """Safely evaluate string dicts."""
         if pd.isna(val) or val == '':
             return {}
         try:
@@ -152,7 +135,6 @@ class CategoryTransformer:
                'dining' in level2_lower or 'food' in level2_lower:
                 return True
 
-        # Check original category
         category_lower = str(category_main).lower() if pd.notna(category_main) else ''
         categories_lower = str(categories_list).lower() if pd.notna(categories_list) else ''
 
@@ -190,7 +172,6 @@ class CategoryTransformer:
         atmosphere = describe_data.get('atmosphere', {}) or {}
         offerings = describe_data.get('offerings', {}) or {}
         service_options = describe_data.get('service_options', {}) or {}
-        dining_options = describe_data.get('dining_options', {}) or {}
         crowd = describe_data.get('crowd', {}) or {}
         planning = describe_data.get('planning', {}) or {}
 
