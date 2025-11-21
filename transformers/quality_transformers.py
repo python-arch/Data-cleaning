@@ -401,9 +401,8 @@ class QualityTransformer:
         else:
             result['review_count'] = None
 
-        # Reformat open_hours to simpler format
-        if 'open_hours' in df.columns:
-            result['open_hours'] = df['open_hours'].apply(self.reformat_open_hours)
+        # Keep open_hours as-is from source data (no reformatting)
+        # open_hours is already included via df.copy()
 
         # Confidence score (kept for reference)
         result['verification_confidence_score'] = df.apply(self.calculate_confidence_score, axis=1)
