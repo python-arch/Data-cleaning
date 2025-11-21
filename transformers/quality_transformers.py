@@ -210,35 +210,6 @@ class QualityTransformer:
             return None
 
     # ========================================================================
-    # Verification Source
-    # ========================================================================
-
-    @staticmethod
-    def determine_verification_source(row: pd.Series) -> str:
-        """
-        Determine verification source based on data characteristics
-
-        Args:
-            row: DataFrame row
-
-        Returns:
-            Source: 'Manual', 'Partner', or 'Automated'
-        """
-        # Check for partner indicators
-        is_claimed = row.get('is_claimed')
-        if pd.notna(is_claimed) and str(is_claimed).lower() == 'true':
-            return 'Partner'
-
-        # Check for manual verification indicators
-        has_detailed_description = pd.notna(row.get('description')) and len(str(row.get('description', ''))) > 100
-        has_multiple_photos = pd.notna(row.get('photo_dates')) and ',' in str(row.get('photo_dates', ''))
-
-        if has_detailed_description and has_multiple_photos:
-            return 'Manual'
-
-        return 'Automated'
-
-    # ========================================================================
     # Phone Validation
     # ========================================================================
 
@@ -442,9 +413,6 @@ class QualityTransformer:
         # Reformat open_hours to simpler format
         if 'open_hours' in df.columns:
             result['open_hours'] = df['open_hours'].apply(self.reformat_open_hours)
-
-        # Verification source
-        result['verification_source'] = df.apply(self.determine_verification_source, axis=1)
 
         # Confidence score (kept for reference)
         result['verification_confidence_score'] = df.apply(self.calculate_confidence_score, axis=1)
