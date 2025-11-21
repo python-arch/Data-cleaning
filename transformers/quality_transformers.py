@@ -172,13 +172,17 @@ class QualityTransformer:
                     day_data = open_hours_data[full_day]
 
                     if isinstance(day_data, dict):
-                        # Check if 24h
-                        if day_data.get('is_24h', False):
+                        # Check if 24h - handle both boolean and string values
+                        is_24h = day_data.get('is_24h', False)
+                        is_24h_bool = is_24h is True or str(is_24h).lower() == 'true'
+
+                        # Check if closed - handle both boolean and string values
+                        closed = day_data.get('closed')
+                        is_closed = closed is True or str(closed).lower() == 'true'
+
+                        if is_24h_bool:
                             result[abbrev] = '24 hours'
-                        # Check if closed
-                        elif day_data.get('closed', False):
-                            result[abbrev] = 'Closed'
-                        # Get intervals
+                        # First check for intervals (prioritize actual hours over closed flag)
                         elif 'intervals' in day_data:
                             intervals = day_data['intervals']
                             if isinstance(intervals, list) and intervals:
@@ -192,11 +196,13 @@ class QualityTransformer:
                                             interval_strs.append(f"{start}-{end}")
                                 if interval_strs:
                                     result[abbrev] = ', '.join(interval_strs)
-                                else:
+                                elif is_closed:
                                     result[abbrev] = 'Closed'
-                            else:
+                                # If intervals exist but no valid times, skip this day
+                            elif is_closed:
                                 result[abbrev] = 'Closed'
-                        else:
+                        # Only mark as closed if explicitly closed and no intervals
+                        elif is_closed:
                             result[abbrev] = 'Closed'
                     else:
                         result[abbrev] = 'Closed'
