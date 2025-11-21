@@ -101,7 +101,6 @@ FINAL_OUTPUT_COLUMNS = [
     'average_stay_duration_minutes', 'traffic_score',
     'rating_count', 'review_count', 'average_rating',
     'data_version_month',
-    'verification_confidence_score', 'data_quality_flag',
     'hotel_star_rating',
     'website_domain', 'phone', 'open_hours',
 ]
