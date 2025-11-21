@@ -407,18 +407,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   Result: "2025-05" (YYYY-MM format)
   ```
 
-#### 23. `verification_source`
-- **Source**: `is_claimed`, `description`, `photo_dates`
-- **Transformer**: `QualityTransformer.determine_verification_source()`
-- **Logic**:
-  ```
-  Determine data source:
-  - If is_claimed = true -> "Partner"
-  - If description > 100 chars AND multiple photos -> "Manual"
-  - Otherwise -> "Automated"
-  ```
-
-#### 24. `verification_confidence_score`
+#### 23. `verification_confidence_score`
 - **Source**: Multiple fields
 - **Transformer**: `QualityTransformer.calculate_confidence_score()`
 - **Logic**:
@@ -440,7 +429,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   Total capped at 100
   ```
 
-#### 25. `data_quality_flag`
+#### 24. `data_quality_flag`
 - **Source**: `is_claimed`, `rating_count`, `review_count`
 - **Transformer**: `QualityTransformer.assess_data_quality()`
 - **Logic**:
@@ -452,7 +441,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   - "Low Confidence": Everything else (no reviews, not claimed)
   ```
 
-#### 26. `phone` (validated)
+#### 25. `phone` (validated)
 - **Source**: `phone`
 - **Transformer**: `QualityTransformer.validate_phone()`
 - **Logic**:
@@ -464,7 +453,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   4. If invalid -> None
   ```
 
-#### 27. `review_count`
+#### 26. `review_count`
 - **Source**: `reviews`
 - **Transformer**: `QualityTransformer.extract_review_count()`
 - **Logic**:
@@ -479,7 +468,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   3. If unparseable -> None
   ```
 
-#### 28. `open_hours`
+#### 27. `open_hours`
 - **Source**: `open_hours`
 - **Transformer**: `QualityTransformer.reformat_open_hours()`
 - **Logic**:
