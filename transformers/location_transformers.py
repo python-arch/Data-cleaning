@@ -170,7 +170,7 @@ class LocationTransformer:
             crs="EPSG:4326",
         )
 
-        gdf = gpd.sjoin(gdf, self.gadm_boundaries, predicate="within")
+        gdf = gpd.sjoin(gdf, self.gadm_boundaries, how='left', predicate="within")
 
         # Rename old columns if they exist to avoid conflicts
         if "region" in gdf.columns:
