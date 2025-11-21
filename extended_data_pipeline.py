@@ -23,7 +23,6 @@ aws_region_name = os.getenv("aws_region_name")
 s3_bucket_name =  os.getenv("s3_bucket_name")
 
 
-# Initialize S3 client
 s3_client = boto3.client(
     's3',
     aws_access_key_id=aws_access_key_id,
@@ -52,37 +51,19 @@ import multiprocessing as mp
 
 warnings.filterwarnings("ignore")
 
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
-
-# Azure OpenAI (Update with your credentials)
 client = AzureOpenAI(
     api_key=os.getenv("api_key"),
     api_version=os.getenv("api_version"),
     azure_endpoint=os.getenv("azure_endpoint"),
 )
 
-# Google Geocoding API (Update with your key)
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-GEOCODE_DELAY = 0.1  # 100ms delay between requests
-
-# ============================================================================
-# OPTIMIZED HELPER FUNCTIONS
-# ============================================================================
+GEOCODE_DELAY = 0.1
 
 from ast import literal_eval
 
 def extract_month_from_filename(filename):
-        """
-        Extract YYYY-MM from YYYYMMDD.csv
-
-        Args:
-            filename: e.g., "United States/20250509/United States.zip"
-
-        Returns:
-            String in format "YYYY-MM" or None
-        """
+        """Extract YYYY-MM from filename."""
         match = re.search(r'(\d{8})', filename)
         if match:
             date_str = match.group(1)
@@ -92,24 +73,12 @@ def extract_month_from_filename(filename):
         return None
 
 def classify_price_level(price_str):
-    """
-    Classify Google Maps price levels into 5 standardized levels (1-5).
-
-    Handles:
-    - Dollar signs: $, $$, $$$, $$$$
-    - Numeric ranges: $1–10, $10–20, $20–30, etc.
-    - Edge cases: null, empty, mixed formats
-
-    Returns: int (1-5) or None for invalid/missing values
-    """
-    # Handle null/empty values
+    """Classify price into 1-5 scale."""
     if pd.isna(price_str) or price_str == '' or price_str is None:
         return None
 
-    # Convert to string and clean
     price_str = str(price_str).strip()
 
-    # Pattern 1: Dollar signs only ($, $$, $$$, $$$$)
     if re.match(r'^\$+$', price_str):
         dollar_count = price_str.count('$')
         if dollar_count == 1:
@@ -121,19 +90,14 @@ def classify_price_level(price_str):
         elif dollar_count >= 4:
             return 5
 
-    # Pattern 2: Numeric ranges ($X–Y, $X-Y, $X+)
-    # Extract numeric values
     numbers = re.findall(r'\d+', price_str)
 
     if numbers:
         if len(numbers) >= 2:
-            # Range format: calculate average
             avg_price = (int(numbers[0]) + int(numbers[1])) / 2
         else:
-            # Single number or $X+ format: use that number
             avg_price = int(numbers[0])
 
-        # Classification based on average price
         if avg_price < 15:
             return 1
         elif avg_price < 25:
@@ -145,11 +109,10 @@ def classify_price_level(price_str):
         else:
             return 5
 
-    # Edge case: unrecognized format
     return None
 
 def safe_eval(val):
-    """Safely evaluate string representations of dictionaries"""
+    """Safely evaluate string dicts."""
     if pd.isna(val) or val == '':
         return {}
     try:

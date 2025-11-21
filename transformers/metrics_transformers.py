@@ -1,6 +1,4 @@
-"""
-Metrics Transformers - Traffic, Duration, Pricing, Reviews
-"""
+"""Metrics transformations for traffic, duration, pricing, and reviews."""
 
 import pandas as pd
 import numpy as np
@@ -10,14 +8,7 @@ from typing import Optional, Any
 
 
 class MetricsTransformer:
-    """
-    Handles metrics-related transformations:
-    - price_level: 1-5 scale (standardized)
-    - average_stay_duration_minutes: Time spent
-    - traffic_score: Visitor traffic index
-    - review_count: Total reviews
-    - average_rating: Mean rating score
-    """
+    """Handles price, duration, traffic, and review metrics."""
 
     def __init__(self):
         """Initialize MetricsTransformer"""

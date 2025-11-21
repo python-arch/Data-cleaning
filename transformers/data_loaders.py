@@ -1,6 +1,4 @@
-"""
-Data Loaders - Robust data loading utilities for reference files
-"""
+"""Data loading utilities for reference files."""
 
 import pandas as pd
 import numpy as np
