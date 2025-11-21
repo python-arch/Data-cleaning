@@ -1,6 +1,4 @@
-"""
-Status Transformers - Business Status, Open/Close Dates, Status Changes
-"""
+"""Status transformations for business status and date tracking."""
 
 import pandas as pd
 import numpy as np
@@ -11,16 +9,8 @@ from collections import defaultdict
 
 
 class StatusTransformer:
-    """
-    Handles status-related transformations:
-    - status: Open / Closed / Temporarily Closed
-    - status_change: Opened this month, Closed this month
-    - open_date: First opening date
-    - closed_date: Closed date
-    - last_verified_date: Date of last manual verification
-    """
+    """Handles business status normalization and date tracking."""
 
-    # Status normalization mapping
     OPEN_STATUSES: Set[str] = {'open', 'open 24 hours', 'operational'}
     CLOSED_STATUSES: Set[str] = {
         'closed', 'closed_temporarily', 'temporarily closed',

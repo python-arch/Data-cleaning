@@ -1,15 +1,8 @@
 """
-USA POI Data Pipeline - Modular Data Cleaning and Transformation
+USA POI Data Pipeline
 
-This pipeline processes POI (Point of Interest) data from S3 for all USA locations
-(not just LA) and transforms it to a standardized output schema.
-
-Features:
-- Modular transformer architecture
-- All USA coverage (not just LA)
-- Full variable mapping as per target schema
-- Data quality scoring
-- Status change tracking
+Processes POI data from S3 for USA locations and outputs
+clean CSV files with 35+ standardized fields.
 """
 
 import os
@@ -26,13 +19,9 @@ import numpy as np
 import boto3
 from tqdm import tqdm
 
-# Suppress warnings
 warnings.filterwarnings("ignore")
-
-# Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-# Import transformers
 from transformers import (
     CoreTransformer,
     LocationTransformer,
@@ -52,18 +41,7 @@ from config.schema_mapping import (
 
 
 class USAPOIPipeline:
-    """
-    Main pipeline class for processing USA POI data
-
-    Processes S3 data through modular transformers:
-    - CoreTransformer: POI ID, name, chain/brand detection
-    - LocationTransformer: Coordinates, address, postal code
-    - CategoryTransformer: Category mapping, dining type
-    - StatusTransformer: Business status, open/close dates
-    - MetricsTransformer: Traffic, duration, price, reviews
-    - QualityTransformer: Data quality assessment
-    - EstablishmentTransformer: Inside establishment detection
-    """
+    """Main pipeline for processing USA POI data from S3."""
 
     def __init__(
         self,
@@ -76,30 +54,15 @@ class USAPOIPipeline:
         brand_config_df: Optional[pd.DataFrame] = None,
         batch_size: int = 200000,
     ):
-        """
-        Initialize the pipeline
-
-        Args:
-            s3_client: Boto3 S3 client
-            s3_bucket_name: S3 bucket name
-            local_download_path: Path for temporary downloads
-            local_save_path: Path for output files
-            gadm_boundaries: GeoPandas GeoDataFrame with admin boundaries
-            category_mapping_df: Category mapping DataFrame
-            brand_config_df: Brand configuration DataFrame
-            batch_size: Rows per processing chunk
-        """
         self.s3_client = s3_client
         self.s3_bucket_name = s3_bucket_name
         self.local_download_path = local_download_path
         self.local_save_path = local_save_path
         self.batch_size = batch_size
 
-        # Create directories
         os.makedirs(local_download_path, exist_ok=True)
         os.makedirs(local_save_path, exist_ok=True)
 
-        # Initialize transformers
         self.core_transformer = CoreTransformer(brand_config_df)
         self.location_transformer = LocationTransformer(gadm_boundaries)
         self.category_transformer = CategoryTransformer(category_mapping_df)
@@ -108,7 +71,6 @@ class USAPOIPipeline:
         self.quality_transformer = QualityTransformer()
         self.establishment_transformer = EstablishmentTransformer()
 
-        # Track statistics
         self.stats = {
             'files_processed': 0,
             'files_skipped': 0,
@@ -122,7 +84,7 @@ class USAPOIPipeline:
 
     @staticmethod
     def extract_month_from_filename(filename: str) -> Optional[str]:
-        """Extract YYYY-MM from filename"""
+        """Get YYYY-MM from filename like '20250509'."""
         match = re.search(r'(\d{8})', filename)
         if match:
             date_str = match.group(1)
@@ -130,7 +92,7 @@ class USAPOIPipeline:
         return None
 
     def _get_source_columns(self) -> List[str]:
-        """Get list of source columns to read"""
+        """Columns we need from source data."""
         return [
             'google_id', 'name', 'name_second', 'country_name', 'country',
             'floor_no', 'phone', 'phone_local', 'street', 'locality',
@@ -148,18 +110,15 @@ class USAPOIPipeline:
         ]
 
     def _clean_coordinates(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Clean and validate coordinates"""
+        """Remove rows with invalid coordinates."""
         initial_rows = len(df)
 
-        # Convert to numeric
         df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
         df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
 
-        # Remove invalid coordinates
         valid_coords = df['latitude'].notna() & df['longitude'].notna()
         df = df[valid_coords].copy()
 
-        # Bounds check
         valid_lat = (df['latitude'] >= -90) & (df['latitude'] <= 90)
         valid_lon = (df['longitude'] >= -180) & (df['longitude'] <= 180)
         df = df[valid_lat & valid_lon].copy()
@@ -168,7 +127,7 @@ class USAPOIPipeline:
         return df
 
     def _filter_usa(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Filter to USA only (continental USA bounds)"""
+        """Keep only USA records."""
         initial_rows = len(df)
 
         outside_usa = self.location_transformer.is_outside_usa_vectorized(
@@ -180,38 +139,24 @@ class USAPOIPipeline:
         return df
 
     def _apply_transformations(self, df: pd.DataFrame, data_version_month: str) -> pd.DataFrame:
-        """Apply all transformers to DataFrame"""
-
-        # 1. Core transformations (POI ID, name, chain, brand)
+        """Run all transformers on the data."""
         df = self.core_transformer.transform_batch(df)
 
-        # 2. Filter invalid names
         initial_rows = len(df)
         df = self.core_transformer.filter_valid_names(df)
         self.stats['removed_invalid_names'] += initial_rows - len(df)
 
-        # 3. Location transformations
         df = self.location_transformer.transform_batch(df)
-
-        # 4. Category transformations
         df = self.category_transformer.transform_batch(df)
-
-        # 5. Status transformations
         df = self.status_transformer.transform_batch(df, data_version_month)
-
-        # 6. Metrics transformations
         df = self.metrics_transformer.transform_batch(df)
-
-        # 7. Establishment transformations
         df = self.establishment_transformer.transform_batch(df)
-
-        # 8. Quality transformations
         df = self.quality_transformer.transform_batch(df, data_version_month)
 
         return df
 
     def _select_output_columns(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Select and order final output columns"""
+        """Pick final output columns in order."""
         output_cols = []
 
         for col in FINAL_OUTPUT_COLUMNS:
@@ -224,26 +169,15 @@ class USAPOIPipeline:
         return df[output_cols]
 
     def process_chunk(self, chunk: pd.DataFrame, data_version_month: str) -> pd.DataFrame:
-        """
-        Process a single chunk of data
-
-        Args:
-            chunk: DataFrame chunk
-            data_version_month: Version month string
-
-        Returns:
-            Processed DataFrame
-        """
+        """Process a single chunk of data."""
         print(f"  Processing chunk with {len(chunk):,} rows...")
 
-        # Clean coordinates
         chunk = self._clean_coordinates(chunk)
 
         if chunk.empty:
             print("  No valid data after coordinate cleaning")
             return pd.DataFrame()
 
-        # Filter to USA
         chunk = self._filter_usa(chunk)
 
         if chunk.empty:
@@ -252,33 +186,20 @@ class USAPOIPipeline:
 
         print(f"  Found {len(chunk):,} USA records")
 
-        # Apply all transformations
         chunk = self._apply_transformations(chunk, data_version_month)
-
-        # Select output columns
         chunk = self._select_output_columns(chunk)
 
         return chunk
 
     def process_file(self, object_key: str) -> Optional[pd.DataFrame]:
-        """
-        Process a single S3 file
-
-        Args:
-            object_key: S3 object key
-
-        Returns:
-            Processed DataFrame or None
-        """
+        """Process a single S3 file."""
         data_version_month = self.extract_month_from_filename(object_key)
         path_parts = object_key.split('/')
         date_str = path_parts[-2] if len(path_parts) >= 2 else ''
 
-        # Generate output filename
         output_filename = f"USA_{date_str}.csv"
         local_save_csv_path = os.path.join(self.local_save_path, output_filename)
 
-        # Skip if already processed
         if os.path.exists(local_save_csv_path):
             print(f"\nSkipping {object_key} - already processed")
             self.stats['files_skipped'] += 1
@@ -304,10 +225,8 @@ class USAPOIPipeline:
             file_size_mb = os.path.getsize(local_zip_path) / (1024 * 1024)
             print(f"Downloaded in {download_time:.2f}s ({file_size_mb:.2f} MB)")
 
-            # Determine compression
             compression = 'zip' if object_key.lower().endswith('.zip') else 'infer'
 
-            # Read in chunks
             csv_chunker = pd.read_csv(
                 local_zip_path,
                 compression=compression,
@@ -339,16 +258,13 @@ class USAPOIPipeline:
             self.stats['total_input_rows'] += total_input_rows
 
             if all_chunks:
-                # Concatenate all chunks
                 print(f"\nConcatenating {len(all_chunks)} chunks...")
                 final_df = pd.concat(all_chunks, ignore_index=True)
 
-                # Remove duplicates across chunks
                 before = len(final_df)
                 final_df = final_df.drop_duplicates(subset='poi_id', keep='first')
                 self.stats['removed_duplicates'] += before - len(final_df)
 
-                # Save
                 print(f"Saving {len(final_df):,} rows to {local_save_csv_path}...")
                 final_df.to_csv(local_save_csv_path, index=False)
 
@@ -371,17 +287,11 @@ class USAPOIPipeline:
             return None
 
         finally:
-            # Cleanup
             if os.path.exists(local_zip_path):
                 os.remove(local_zip_path)
 
     def run(self, prefix_filter: str = 'United States/2'):
-        """
-        Run the pipeline on all matching S3 files
-
-        Args:
-            prefix_filter: S3 prefix to filter files
-        """
+        """Run the pipeline on all matching S3 files."""
         print("=" * 80)
         print("USA POI DATA PIPELINE")
         print("=" * 80)
@@ -390,7 +300,6 @@ class USAPOIPipeline:
 
         start_time = time.time()
 
-        # List S3 objects
         paginator = self.s3_client.get_paginator('list_objects_v2')
         pages = paginator.paginate(Bucket=self.s3_bucket_name)
 
@@ -401,11 +310,9 @@ class USAPOIPipeline:
             for obj in page['Contents']:
                 object_key = obj['Key']
 
-                # Filter for USA data files
                 if prefix_filter in object_key and 'big_categories_data' not in object_key:
                     self.process_file(object_key)
 
-        # Print summary
         total_time = time.time() - start_time
 
         print("\n" + "=" * 80)
@@ -424,12 +331,8 @@ class USAPOIPipeline:
         print("=" * 80)
 
 
-# ============================================================================
-# MAIN EXECUTION
-# ============================================================================
-
 def load_environment():
-    """Load environment variables"""
+    """Load AWS credentials from .env file."""
     from dotenv import load_dotenv
 
     env_path = Path(".env")
@@ -445,15 +348,13 @@ def load_environment():
 
 
 def main():
-    """Main entry point"""
+    """Entry point."""
     print("\n" + "=" * 80)
-    print("USA POI DATA PIPELINE - MODULAR VERSION")
+    print("USA POI DATA PIPELINE")
     print("=" * 80)
 
-    # Load environment
     env = load_environment()
 
-    # Initialize S3 client
     s3_client = boto3.client(
         's3',
         aws_access_key_id=env['aws_access_key_id'],
@@ -461,17 +362,14 @@ def main():
         region_name=env['aws_region_name'],
     )
 
-    # Configuration
     LOCAL_DOWNLOAD_PATH = '/tmp/s3_data_download'
     LOCAL_SAVE_PATH = './output/usa'
     BATCH_SIZE = 200000
 
-    # Load reference data (optional)
     gadm_boundaries = None
     category_mapping_df = None
     brand_config_df = None
 
-    # Try to load GADM boundaries
     try:
         import geopandas as gpd
         gadm_path = os.getenv('GADM_PATH', 'data/usa_admin.geojson')
@@ -481,31 +379,26 @@ def main():
     except Exception as e:
         print(f"Warning: Could not load GADM boundaries: {e}")
 
-    # Try to load category mapping using robust loader
     try:
         cat_path = os.getenv('CATEGORY_MAPPING_PATH', 'data/xmap_poi_categorization.csv')
         category_mapping_df = load_category_mapping(cat_path)
         if category_mapping_df is not None:
             print(f"Loaded category mapping: {len(category_mapping_df)} categories")
-            print(f"  Detected columns: {list(category_mapping_df.columns)}")
         else:
             print(f"Warning: Could not load category mapping from {cat_path}")
     except Exception as e:
         print(f"Warning: Could not load category mapping: {e}")
 
-    # Try to load brand config using robust loader
     try:
         brand_path = os.getenv('BRAND_CONFIG_PATH', 'data/branding_usa_configs.csv')
         brand_config_df = load_brand_config(brand_path)
         if brand_config_df is not None:
             print(f"Loaded brand config: {len(brand_config_df)} brands")
-            print(f"  Detected columns: {list(brand_config_df.columns)}")
         else:
             print(f"Warning: Could not load brand config from {brand_path}")
     except Exception as e:
         print(f"Warning: Could not load brand config: {e}")
 
-    # Initialize pipeline
     pipeline = USAPOIPipeline(
         s3_client=s3_client,
         s3_bucket_name=env['s3_bucket_name'],
@@ -517,7 +410,6 @@ def main():
         batch_size=BATCH_SIZE,
     )
 
-    # Run pipeline
     try:
         pipeline.run()
     except KeyboardInterrupt:

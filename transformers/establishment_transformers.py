@@ -1,6 +1,4 @@
-"""
-Establishment Transformers - Inside Establishment Detection
-"""
+"""Establishment transformations for parent location detection."""
 
 import pandas as pd
 import numpy as np
@@ -9,15 +7,8 @@ from typing import Optional, Any, List
 
 
 class EstablishmentTransformer:
-    """
-    Handles inside establishment transformations:
-    - inside_establishment_flag: yes/no
-    - parent_establishment_name: Name of parent (e.g., "Dubai Mall")
-    - parent_establishment_type: Mall, Airport, Hospital, Campus, etc.
-    - floor_level: Floor number (e.g., "L2", "Ground")
-    """
+    """Handles parent establishment detection and floor level normalization."""
 
-    # Parent type mapping based on category keywords
     PARENT_TYPE_MAPPING = {
         # Mall/Shopping
         'shopping_mall': 'Mall',

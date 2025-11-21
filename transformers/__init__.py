@@ -1,7 +1,4 @@
-"""
-Transformers module for USA POI Data Pipeline
-Contains modular transformers for each variable group
-"""
+"""Transformers for the POI data pipeline."""
 
 from .core_transformers import CoreTransformer
 from .location_transformers import LocationTransformer

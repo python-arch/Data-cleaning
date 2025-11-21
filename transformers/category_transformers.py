@@ -1,6 +1,4 @@
-"""
-Category Transformers - Hierarchical Category Mapping
-"""
+"""Category transformations for hierarchical mapping and dining classification."""
 
 import pandas as pd
 import numpy as np
@@ -10,13 +8,8 @@ from ast import literal_eval
 
 
 class CategoryTransformer:
-    """
-    Handles category-related transformations:
-    - category_level_1/2/3: Hierarchical business categories
-    - dining_type: QSR, Casual Dining, Fine Dining, Family Dining
-    """
+    """Handles category hierarchy mapping and dining type classification."""
 
-    # Restaurant keywords for classification
     RESTAURANT_KEYWORDS = [
         'restaurant', 'food', 'dining', 'cafe', 'deli', 'grill',
         'kitchen', 'eatery', 'bistro', 'brasserie', 'cafeteria',
@@ -24,7 +17,6 @@ class CategoryTransformer:
         'bar', 'steakhouse', 'sushi', 'bakery', 'coffee', 'juice'
     ]
 
-    # QSR brand keywords
     QSR_BRANDS = [
         'subway', 'pizza hut', 'burger king', 'starbucks', 'smoothie king',
         'popeyes', 'chick-fil-a', 'dairy queen', 'papa johns', 'taco bell',
@@ -34,40 +26,18 @@ class CategoryTransformer:
         'firehouse subs', 'jimmy john', 'qdoba', 'moe\'s', 'raising cane'
     ]
 
-    # Column name mappings for flexible schema support
-    # Maps internal names to possible column names in source data
     LEVEL1_COLUMNS = ['meta_category', 'big_category', 'category_level_1', 'category_l1']
     LEVEL2_COLUMNS = ['middle_category', 'mapped_category', 'category_level_2', 'category_l2']
     LEVEL3_COLUMNS = ['target_category', 'final_category', 'category_level_3', 'category_l3']
     ORIGINAL_COLUMNS = ['original_category', 'source_category', 'category', 'category_main']
 
     def __init__(self, category_mapping_df: Optional[pd.DataFrame] = None):
-        """
-        Initialize CategoryTransformer
-
-        Args:
-            category_mapping_df: DataFrame with category mapping
-                Flexible schema - supports various column names:
-                - Original category: original_category, source_category, category, category_main
-                - Level 1 (meta): meta_category, big_category, category_level_1
-                - Level 2 (middle): middle_category, mapped_category, category_level_2
-                - Level 3 (target): target_category, final_category, category_level_3
-        """
         self.category_mapping = category_mapping_df
         self._column_mapping = {}
         self._build_category_index()
 
     def _find_column(self, df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
-        """
-        Find the first matching column name from candidates
-
-        Args:
-            df: DataFrame to search
-            candidates: List of possible column names
-
-        Returns:
-            First matching column name or None
-        """
+        """Find the first matching column name from candidates."""
         if df is None:
             return None
         for col in candidates:
@@ -76,7 +46,7 @@ class CategoryTransformer:
         return None
 
     def _build_category_index(self):
-        """Build efficient lookup for category mapping with flexible column detection"""
+        """Build lookup index for category mapping."""
         self.category_map = {}
 
         if self.category_mapping is None:
@@ -137,23 +107,10 @@ class CategoryTransformer:
                 }
 
             except Exception:
-                # Skip malformed rows
                 continue
 
-    # ========================================================================
-    # Category Mapping
-    # ========================================================================
-
     def map_category(self, category_main: Any) -> Dict[str, Optional[str]]:
-        """
-        Map original category to hierarchical levels
-
-        Args:
-            category_main: Original category string
-
-        Returns:
-            Dict with level_1, level_2, level_3
-        """
+        """Map original category to hierarchical levels."""
         if pd.isna(category_main):
             return {'level_1': None, 'level_2': None, 'level_3': None}
 
@@ -165,15 +122,7 @@ class CategoryTransformer:
         return {'level_1': None, 'level_2': None, 'level_3': None}
 
     def transform_categories(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Apply category mapping to DataFrame
-
-        Args:
-            df: DataFrame with category_main column
-
-        Returns:
-            DataFrame with category_level_1/2/3 columns
-        """
+        """Apply category mapping to DataFrame."""
         result = df.copy()
 
         if 'category_main' in df.columns:
@@ -184,13 +133,9 @@ class CategoryTransformer:
 
         return result
 
-    # ========================================================================
-    # Dining Type Classification
-    # ========================================================================
-
     @staticmethod
     def safe_eval(val: Any) -> Dict:
-        """Safely evaluate string representations of dictionaries"""
+        """Safely evaluate string dicts."""
         if pd.isna(val) or val == '':
             return {}
         try:
@@ -200,18 +145,7 @@ class CategoryTransformer:
 
     def _is_restaurant(self, category_main: str, categories_list: str,
                        category_level_2: Optional[str] = None) -> bool:
-        """
-        Check if POI is a restaurant based on categories
-
-        Args:
-            category_main: Original category from source data
-            categories_list: List of categories as string
-            category_level_2: Mapped middle category (e.g., "Restaurants & Eateries")
-
-        Returns:
-            True if POI is a restaurant, False otherwise
-        """
-        # Check mapped category first (most reliable)
+        """Check if POI is a restaurant based on categories."""
         if category_level_2 and pd.notna(category_level_2):
             level2_lower = str(category_level_2).lower().strip()
             if 'restaurant' in level2_lower or 'eateries' in level2_lower or \
@@ -226,20 +160,11 @@ class CategoryTransformer:
                    for keyword in self.RESTAURANT_KEYWORDS)
 
     def classify_dining_type(self, row: pd.Series) -> Optional[str]:
-        """
-        Classify restaurant into dining categories
-
-        Args:
-            row: DataFrame row with relevant columns
-
-        Returns:
-            Dining type: QSR, Fine Dining, Family Dining, Casual Dining, or None
-        """
+        """Classify restaurant into dining categories."""
         category_main = str(row.get('category_main', '')).lower() if pd.notna(row.get('category_main')) else ''
         categories_list = str(row.get('categories_list', '')).lower() if pd.notna(row.get('categories_list')) else ''
         name = str(row.get('name', '')).lower() if pd.notna(row.get('name')) else ''
 
-        # Get price level safely
         price_level = row.get('price_level')
         if pd.isna(price_level):
             price_level = None
@@ -249,14 +174,11 @@ class CategoryTransformer:
             except (TypeError, ValueError):
                 price_level = None
 
-        # Get mapped category level 2 for restaurant detection
         category_level_2 = row.get('category_level_2')
 
-        # Check if it's a restaurant
         if not self._is_restaurant(category_main, categories_list, category_level_2):
             return None
 
-        # Parse describe_data
         describe_data_raw = row.get('describe_data', '{}')
         if pd.isna(describe_data_raw):
             describe_data = {}
@@ -265,7 +187,6 @@ class CategoryTransformer:
             if not isinstance(describe_data, dict):
                 describe_data = {}
 
-        # Extract data safely
         atmosphere = describe_data.get('atmosphere', {}) or {}
         offerings = describe_data.get('offerings', {}) or {}
         service_options = describe_data.get('service_options', {}) or {}
@@ -279,8 +200,6 @@ class CategoryTransformer:
         crowd_values = [str(v).lower() for v in crowd.values()]
         planning_values = [str(v).lower() for v in planning.values()]
 
-        # Calculate scores
-        # QSR Score
         qsr_score = 0
         if any(keyword in name for keyword in self.QSR_BRANDS):
             qsr_score += 5
@@ -295,7 +214,6 @@ class CategoryTransformer:
         if "doesn't accept reservations" in str(planning_values):
             qsr_score += 1
 
-        # Fine Dining Score
         fine_dining_score = 0
         if price_level in [4, 5]:
             fine_dining_score += 5
@@ -308,7 +226,6 @@ class CategoryTransformer:
         if 'accepts reservations' in str(planning_values):
             fine_dining_score += 3
 
-        # Family Dining Score
         family_dining_score = 0
         if any('family-friendly' in c for c in crowd_values):
             family_dining_score += 4
@@ -321,7 +238,6 @@ class CategoryTransformer:
         if any('good for kids' in c for c in crowd_values):
             family_dining_score += 2
 
-        # Casual Dining Score
         casual_score = 0
         if any('casual' in a for a in atmosphere_values):
             casual_score += 4
@@ -330,7 +246,6 @@ class CategoryTransformer:
         if price_level in [2, 3]:
             casual_score += 2
 
-        # Decision logic
         if qsr_score >= 5:
             return 'QSR'
         if fine_dining_score >= 7:
@@ -347,7 +262,6 @@ class CategoryTransformer:
 
         max_score = max(scores.values())
         if max_score == 0:
-            # Fallback based on price level
             if price_level == 1:
                 return 'QSR'
             elif price_level in [4, 5]:
@@ -357,32 +271,14 @@ class CategoryTransformer:
             else:
                 return 'Casual Dining'
 
-        # Return highest scoring category
         for category, score in sorted(scores.items(), key=lambda x: x[1], reverse=True):
             if score == max_score:
                 return category
 
         return 'Casual Dining'
 
-    # ========================================================================
-    # Batch Transformations
-    # ========================================================================
-
     def transform_batch(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Apply all category transformations to a DataFrame
-
-        Args:
-            df: Input DataFrame
-
-        Returns:
-            DataFrame with transformed columns
-        """
-        # First apply category mapping to get category_level_2
+        """Apply all category transformations to a DataFrame."""
         result = self.transform_categories(df)
-
-        # Add dining type classification (uses category_level_2 for restaurant detection)
-        # Note: We apply to result, not df, so category_level_2 is available
         result['dining_type'] = result.apply(self.classify_dining_type, axis=1)
-
         return result

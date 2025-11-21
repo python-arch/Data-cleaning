@@ -1,6 +1,4 @@
-"""
-Quality Transformers - Data Quality Assessment and Verification
-"""
+"""Quality transformations for data quality scoring and verification."""
 
 import pandas as pd
 import numpy as np
@@ -10,15 +8,8 @@ from typing import Optional, Any, Dict
 
 
 class QualityTransformer:
-    """
-    Handles data quality transformations:
-    - data_version_month: Version identifier (YYYY-MM)
-    - verification_source: Manual, Partner, Automated
-    - verification_confidence_score: 0-100
-    - data_quality_flag: Clean, Needs Review, Low Confidence
-    """
+    """Handles data quality scoring and verification flags."""
 
-    # Quality weights for scoring
     QUALITY_WEIGHTS = {
         'has_name': 10,
         'has_valid_coords': 15,
