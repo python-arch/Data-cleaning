@@ -23,7 +23,7 @@ This pipeline processes raw POI data from an S3 bucket, applies data cleaning ru
 **Key Features:**
 - Multi-version processing with status change detection between consecutive versions
 - 4-level category hierarchy mapping
-- Quality scoring based on verification signals
+- Review count extraction from reviews JSON
 - Simplified open hours format for better readability
 
 ---
@@ -443,41 +443,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   Result: "2025-05" (YYYY-MM format)
   ```
 
-#### 25. `verification_confidence_score`
-- **Source**: Multiple fields
-- **Transformer**: `QualityTransformer.calculate_confidence_score()`
-- **Logic**:
-  ```
-  Weighted scoring (0-100):
-  - Has name: +10
-  - Has valid coordinates: +15
-  - Has address: +10
-  - Has phone: +10
-  - Has website: +5
-  - Has category: +10
-  - Has rating: +5
-  - Has reviews (>0): +5
-  - Has hours: +5
-  - Name quality (not numeric/coordinates): +10
-  - Address quality (no HTTP, >10 chars): +10
-  - Phone valid (passes phonenumbers validation): +5
-
-  Total capped at 100
-  ```
-
-#### 26. `data_quality_flag`
-- **Source**: `is_claimed`, `rating_count`, `review_count`
-- **Transformer**: `QualityTransformer.assess_data_quality()`
-- **Logic**:
-  ```
-  Based on verification signals:
-
-  - "Clean": is_claimed = true AND rating_count > 5 AND review_count > 3
-  - "Needs Review": rating_count >= 1 OR is_claimed = true
-  - "Low Confidence": Everything else (no reviews, not claimed)
-  ```
-
-#### 27. `phone` (validated)
+#### 25. `phone` (validated)
 - **Source**: `phone`
 - **Transformer**: `QualityTransformer.validate_phone()`
 - **Logic**:
@@ -489,7 +455,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   4. If invalid -> None
   ```
 
-#### 28. `review_count`
+#### 26. `review_count`
 - **Source**: `reviews`
 - **Transformer**: `QualityTransformer.extract_review_count()`
 - **Logic**:
@@ -504,7 +470,7 @@ These fields are computed or derived from one or more source columns. Each inclu
   3. If unparseable -> None
   ```
 
-#### 29. `open_hours`
+#### 27. `open_hours`
 - **Source**: `open_hours`
 - **Transformer**: `QualityTransformer.reformat_open_hours()`
 - **Logic**:
