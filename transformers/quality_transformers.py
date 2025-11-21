@@ -109,29 +109,26 @@ class QualityTransformer:
     # Open Hours Reformatting
     # ========================================================================
 
+    
+
     @staticmethod
     def reformat_open_hours(open_hours_data: Any) -> Optional[str]:
         """
         Reformat open_hours from complex JSON to simpler format
-
         Input format:
         {
             "Sunday": {"intervals": [{"start": "11:00", "end": "18:00"}], "is_24h": false, "closed": false},
             ...
         }
-
         Output format (simpler JSON):
         {"Mon": "11:00-18:00", "Tue": "11:00-18:00", ..., "Sun": "Closed"}
-
         Args:
             open_hours_data: Raw open hours data
-
         Returns:
             Reformatted JSON string or None
         """
         if pd.isna(open_hours_data) or open_hours_data == '':
             return None
-
         try:
             # Parse if string
             if isinstance(open_hours_data, str):
@@ -147,10 +144,8 @@ class QualityTransformer:
                         open_hours_data = literal_eval(hours_str)
                     except (ValueError, SyntaxError):
                         return None
-
             if not isinstance(open_hours_data, dict):
                 return None
-
             # Day name mapping to abbreviations
             day_abbrevs = {
                 'Sunday': 'Sun',
@@ -161,31 +156,23 @@ class QualityTransformer:
                 'Friday': 'Fri',
                 'Saturday': 'Sat'
             }
-
             # Standard day order
             day_order = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-
             result = {}
-
             for full_day, abbrev in day_abbrevs.items():
                 if full_day in open_hours_data:
                     day_data = open_hours_data[full_day]
-
                     if isinstance(day_data, dict):
-                        # Check if 24h - handle both boolean and string values
-                        is_24h = day_data.get('is_24h', False)
-                        is_24h_bool = is_24h is True or str(is_24h).lower() == 'true'
-
-                        # Check if closed - handle both boolean and string values
-                        closed = day_data.get('closed')
-                        is_closed = closed is True or str(closed).lower() == 'true'
-
-                        if is_24h_bool:
+                        # Check if 24h
+                        if day_data.get('is_24h', False):
                             result[abbrev] = '24 hours'
-                        # First check for intervals (prioritize actual hours over closed flag)
+                        # Check if closed
+                        elif day_data.get('closed', True):
+                            result[abbrev] = 'Closed'
+                        # Get intervals
                         elif 'intervals' in day_data:
                             intervals = day_data['intervals']
-                            if isinstance(intervals, list) and intervals:
+                            if isinstance(intervals, list) and len(intervals) > 0:
                                 # Format each interval
                                 interval_strs = []
                                 for interval in intervals:
@@ -196,25 +183,21 @@ class QualityTransformer:
                                             interval_strs.append(f"{start}-{end}")
                                 if interval_strs:
                                     result[abbrev] = ', '.join(interval_strs)
-                                elif is_closed:
+                                else:
                                     result[abbrev] = 'Closed'
-                                # If intervals exist but no valid times, skip this day
-                            elif is_closed:
+                            else:
                                 result[abbrev] = 'Closed'
-                        # Only mark as closed if explicitly closed and no intervals
-                        elif is_closed:
+                        else:
                             result[abbrev] = 'Closed'
                     else:
                         result[abbrev] = 'Closed'
-
-            # Return ordered result as JSON string
+            # Return ordered result as JSON string - include all days
             if result:
-                ordered_result = {day: result.get(day, 'Closed') for day in day_order if day in result}
+                ordered_result = {day: result.get(day, 'Closed') for day in day_order}
                 return json.dumps(ordered_result)
-
             return None
-
-        except Exception:
+        except Exception as e:
+            print(f"Error processing: {e}")
             return None
 
     # ========================================================================
