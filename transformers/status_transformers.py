@@ -11,20 +11,13 @@ from collections import defaultdict
 class StatusTransformer:
     """Handles business status normalization and date tracking."""
 
-    OPEN_STATUSES: Set[str] = {'open', 'open 24 hours', 'operational'}
-    CLOSED_STATUSES: Set[str] = {
-        'closed', 'closed_temporarily', 'temporarily closed',
-        'permanently closed', 'closed permanently'
-    }
+    OPEN_STATUSES: Set[str] = {'open', 'open 24 hours'}
+    CLOSED_STATUSES: Set[str] = {'temporarily closed', 'permanently closed'}
 
     STATUS_MAPPING = {
         'open': 'Open',
         'open 24 hours': 'Open',
-        'operational': 'Open',
-        'closed': 'Closed',
         'permanently closed': 'Closed',
-        'closed permanently': 'Closed',
-        'closed_temporarily': 'Temporarily Closed',
         'temporarily closed': 'Temporarily Closed',
     }
 
