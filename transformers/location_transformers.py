@@ -148,7 +148,17 @@ class LocationTransformer:
         return result
 
     def apply_gadm_boundaries(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Apply GADM spatial join to correct city/state from coordinates."""
+        """Apply GADM spatial join to correct region/locality from coordinates.
+
+        Uses GADM administrative boundaries to derive accurate region (state/province)
+        and locality (city/county) values from coordinates instead of using source data.
+
+        Args:
+            df: DataFrame with latitude and longitude columns
+
+        Returns:
+            DataFrame with region and locality columns derived from GADM
+        """
         if self.gadm_boundaries is None:
             return df
 
@@ -162,27 +172,44 @@ class LocationTransformer:
 
         gdf = gpd.sjoin(gdf, self.gadm_boundaries, predicate="within")
 
-        if "NAME_1" in gdf.columns:
-            gdf.rename(columns={"NAME_1": "state"}, inplace=True)
-        if "NAME_2" in gdf.columns:
-            gdf.rename(columns={"NAME_2": "city"}, inplace=True)
+        # Rename old columns if they exist to avoid conflicts
+        if "region" in gdf.columns:
+            gdf.rename(columns={"region": "old_region"}, inplace=True)
+        if "locality" in gdf.columns:
+            gdf.rename(columns={"locality": "old_locality"}, inplace=True)
 
-        columns_to_drop = ["index_right", "geometry"]
+        # Map GADM columns to target schema
+        # NAME_1 = first-level admin division (state/province) -> region
+        # NAME_2 = second-level admin division (city/county) -> locality
+        if "NAME_1" in gdf.columns:
+            gdf.rename(columns={"NAME_1": "region"}, inplace=True)
+        if "NAME_2" in gdf.columns:
+            gdf.rename(columns={"NAME_2": "locality"}, inplace=True)
+
+        columns_to_drop = ["old_region", "old_locality", "index_right", "geometry"]
         gdf.drop(columns=[col for col in columns_to_drop if col in gdf.columns], inplace=True)
 
         return pd.DataFrame(gdf)
 
     def transform_batch(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Apply all location transformations to a DataFrame."""
+        """Apply all location transformations to a DataFrame.
+
+        Transforms include:
+        - Address cleaning (removing plus code prefixes)
+        - Country code mapping
+        - Postal code validation and extraction
+        - Coordinate noise addition for privacy
+        - Region/locality cleaning via GADM boundaries (if available)
+
+        Note: region and locality are derived from GADM boundaries using coordinates,
+        not directly from source columns. This ensures accurate administrative
+        division mapping.
+        """
         result = df.copy()
 
         if 'address' in df.columns:
             result['address_full'] = df['address'].apply(self.clean_address)
 
-        if 'locality' in df.columns:
-            result['city'] = df['locality']
-        if 'region_level_1' in df.columns:
-            result['state'] = df['region_level_1']
         if 'country' in df.columns:
             result['country_code'] = df['country']
             result['country_isocode'] = df['country']
@@ -194,6 +221,10 @@ class LocationTransformer:
             result['latitude'] = df['latitude'].apply(self.add_coordinate_noise)
         if 'longitude' in df.columns:
             result['longitude'] = df['longitude'].apply(self.add_coordinate_noise)
+
+        # Apply GADM boundaries to derive region/locality from coordinates
+        # This replaces direct source mapping for accurate administrative divisions
+        result = self.apply_gadm_boundaries(result)
 
         return result
 
