@@ -491,6 +491,7 @@ def load_environment():
         'aws_secret_access_key': os.getenv("aws_secret_access_key"),
         'aws_region_name': os.getenv("aws_region_name"),
         's3_bucket_name': os.getenv("s3_bucket_name"),
+        's3_output_bucket_name': os.getenv("s3_output_bucket_name"),
     }
 
 
